@@ -24,7 +24,6 @@
  */
 package com.runecraftingtracker;
 
-
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
