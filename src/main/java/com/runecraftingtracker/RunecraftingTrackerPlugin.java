@@ -131,18 +131,6 @@ public class RunecraftingTrackerPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onChatMessage(ChatMessage event)
-	{
-		if (event.getType() == ChatMessageType.SPAM || event.getType() == ChatMessageType.GAMEMESSAGE)
-		{
-			if (event.getMessage().contains(CRAFTED_NOTIFICATION_MESSAGE))
-			{
-				takeInventorySnapshot();
-			}
-		}
-	}
-
-	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
 		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
