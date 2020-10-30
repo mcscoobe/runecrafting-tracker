@@ -90,7 +90,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
-		uiPanel = new RunecraftingTrackerPanel(runeTracker);
+		uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
 
 		uiNavigationButton = NavigationButton.builder()
 			.tooltip("Runecrafting Tracker")
