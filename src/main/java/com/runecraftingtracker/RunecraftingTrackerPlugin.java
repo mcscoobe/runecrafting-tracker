@@ -63,7 +63,6 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
-	private static final String CRAFTED_NOTIFICATION_MESSAGE = "You bind the temple's power into runes.";
 	private static final int RUNECRAFTING_ANIMATION_ID = 791;
 
 	private RunecraftingTrackerPanel uiPanel;
