@@ -41,6 +41,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -63,10 +64,11 @@ import net.runelite.client.util.ImageUtil;
 public class RunecraftingTrackerPlugin extends Plugin
 {
 	private static final String CRAFTED_NOTIFICATION_MESSAGE = "You bind the temple's power into runes.";
+	private static final int RUNECRAFTING_ANIMATION_ID = 791;
 
-	RunecraftingTrackerPanel uiPanel;
+	private RunecraftingTrackerPanel uiPanel;
 
-	int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880};
+	private int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880};
 
 	private NavigationButton uiNavigationButton;
 	private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
@@ -141,6 +143,27 @@ public class RunecraftingTrackerPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onAnimationChanged(AnimationChanged event)
+	{
+		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		{
+			return;
+		}
+
+		String playerName = client.getLocalPlayer().getName();
+		String actorName = event.getActor().getName();
+
+		if (playerName.equals(actorName))
+		{
+			int animId = event.getActor().getAnimation();
+			if (animId == RUNECRAFTING_ANIMATION_ID)
+			{
+				takeInventorySnapshot();
+			}
+		}
+	}
+
+	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
 		if (event.getContainerId() != InventoryID.INVENTORY.getId())
@@ -155,52 +178,49 @@ public class RunecraftingTrackerPlugin extends Plugin
 	{
 		if (inventorySnapshot != null)
 		{
+			// Create inventory multiset {id -> quantity}
 			Multiset<Integer> currentInventory = HashMultiset.create();
 			Arrays.stream(current.getItems())
 				.forEach(item -> currentInventory.add(item.getId(), item.getQuantity()));
 
+			// Get inventory diff with snapshot
 			final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
 
+			// Convert multiset diff to ItemStack list
 			List<ItemStack> items = diff.entrySet().stream()
 				.map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
 				.collect(Collectors.toList());
 
 			LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
 
-			for (ItemStack stack : items)
-			{
-				for (PanelItemData item : panels)
+			if (items.size() > 0) {
+				for (ItemStack stack : items)
 				{
-					if (!item.isVisible())
+					for (PanelItemData item : panels)
 					{
 						if (item.getId() == stack.getId())
 						{
-							item.setVisible(true);
-							item.setCrafted(item.getCrafted() + stack.getQuantity());
-						}
-					}
-					else
-					{
-						if (item.getId() == stack.getId())
-						{
+							if (!item.isVisible()) {
+								item.setVisible(true);
+							}
 							item.setCrafted(item.getCrafted() + stack.getQuantity());
 						}
 					}
 				}
 
-				// System.out.println(stack.getId() + ": " + stack.getQuantity());
-			}
-			inventorySnapshot = null;
-			try
-			{
-				SwingUtilities.invokeAndWait(uiPanel::pack);
-			}
-			catch (InterruptedException | InvocationTargetException e)
-			{
-				e.printStackTrace();
-			}
+				inventorySnapshot = null;
 
-			uiPanel.refresh();
+				try
+				{
+					SwingUtilities.invokeAndWait(uiPanel::pack);
+				}
+				catch (InterruptedException | InvocationTargetException e)
+				{
+					e.printStackTrace();
+				}
+
+				uiPanel.refresh();
+			}
 		}
 	}
 
