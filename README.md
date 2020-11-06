@@ -1,5 +1,7 @@
 # Runecrafting Tracker
-Track your total profit, and the amount of runes you have crafted!
+Track your total profit, and the amount of runes you have crafted!  
+[Link to plugin on RuneLite](https://github.com/runelite/plugin-hub/blob/master/plugins/runecrafting-tracker)
+
 
 ![No runes crafted](https://user-images.githubusercontent.com/22432233/97731653-b57a9d00-1ad5-11eb-9084-53a10af117ba.png)
 
