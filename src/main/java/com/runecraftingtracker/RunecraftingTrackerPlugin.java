@@ -147,6 +147,10 @@ public class RunecraftingTrackerPlugin extends Plugin
 			{
 				takeInventorySnapshot();
 			}
+			else
+			{
+				inventorySnapshot = null;
+			}
 		}
 	}
 
@@ -194,8 +198,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 						}
 					}
 				}
-
-				inventorySnapshot = null;
+				inventorySnapshot = currentInventory;
 
 				try
 				{

@@ -29,9 +29,7 @@ import java.awt.Color;
 import java.awt.GridLayout;
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.swing.ImageIcon;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
+import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
 import net.runelite.client.game.ItemManager;
@@ -79,7 +77,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		pack();
 	}
 
-	protected void pack()
+		protected void pack()
 	{
 		layoutContainer.removeAll();
 
@@ -183,6 +181,36 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		textContainer.add(middleLine);
 
 		panelContainer.add(textContainer, BorderLayout.CENTER);
+
+		final JMenuItem resetAll = new JMenuItem("Reset All");
+
+		resetAll.addActionListener(e ->
+		{
+			final int result = JOptionPane.showOptionDialog(panelContainer, String.format("<html>This will permanently delete <b>all</b> crafted runes.</html>"),
+					"Are you sure?", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
+					null, new String[]{"Yes", "No"}, "No");
+
+			if (result != JOptionPane.YES_OPTION)
+			{
+				return;
+			}
+
+
+			for (PanelItemData item : runeTracker)
+			{
+				item.setCrafted(0);
+				item.setVisible(false);
+			}
+
+			layoutContainer.removeAll();
+			layoutContainer.add(errorPanel);
+
+		});
+
+		final JPopupMenu popupMenu = new JPopupMenu();
+		popupMenu.setBorder(new EmptyBorder(5, 5, 5, 5));
+		popupMenu.add(resetAll);
+		panelContainer.setComponentPopupMenu(popupMenu);
 
 		return panelContainer;
 	}
