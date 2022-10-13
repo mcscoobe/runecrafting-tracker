@@ -65,7 +65,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 	private RunecraftingTrackerPanel uiPanel;
 
-	private int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880};
+	private int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
 
 	private NavigationButton uiNavigationButton;
 	private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
@@ -121,7 +121,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		if (event.getGameState() == GameState.LOGIN_SCREEN)
+		if (event.getGameState() == GameState.LOGGING_IN)
 		{
 			if (runeTracker.size() == 0) {
 				clientThread.invokeLater(this::init);
@@ -228,5 +228,5 @@ public class RunecraftingTrackerPlugin extends Plugin
 	}
 
 	enum Runes
-	{AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH}
+	{AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH, MIST, DUST, MUD, SMOKE, STEAM, LAVA}
 }
