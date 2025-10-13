@@ -36,13 +36,8 @@ import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Client;
-import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
-import net.runelite.api.ItemContainer;
-import net.runelite.api.events.AnimationChanged;
-import net.runelite.api.events.GameStateChanged;
-import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.*;
+import net.runelite.api.events.*;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -55,181 +50,154 @@ import net.runelite.client.util.ImageUtil;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Runecrafting Tracker",
-	description = "Track your total profit and the amount of runes you have crafted",
-	tags = {"rc", "rune", "craft", "runecraft", "runecrafting", "track", "tracker", "zmi", "ourania", "altar"}
+        name = "Runecrafting Tracker",
+        description = "Track your total profit and the amount of runes you have crafted",
+        tags = {"rc", "rune", "craft", "runecraft", "runecrafting", "track", "tracker", "zmi", "ourania", "altar"}
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
-	private static final int RUNECRAFTING_ANIMATION_ID = 791;
+    private static final int RUNECRAFTING_ANIMATION_ID = 791;
 
-	private RunecraftingTrackerPanel uiPanel;
+    private RunecraftingTrackerPanel uiPanel;
 
-	private int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
+    private final int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
+    private final int[] regionIds = new int[]{1111, 2222};
+    private NavigationButton uiNavigationButton;
+    private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
+    private Multiset<Integer> inventorySnapshot;
 
-	private NavigationButton uiNavigationButton;
-	private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
-	private Multiset<Integer> inventorySnapshot;
+    @Inject
+    private ClientToolbar clientToolbar;
 
-	@Inject
-	private ClientToolbar clientToolbar;
+    @Inject
+    private Client client;
 
-	@Inject
-	private Client client;
+    @Inject
+    private ClientThread clientThread;
 
-	@Inject
-	private ClientThread clientThread;
+    @Inject
+    private ItemManager manager;
 
-	@Inject
-	private ItemManager manager;
+    @Override
+    protected void startUp() throws Exception
+    {
+        final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
+        uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
 
-	@Override
-	protected void startUp() throws Exception
-	{
-		final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
-		uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
+        uiNavigationButton = NavigationButton.builder()
+                .tooltip("Runecrafting Tracker")
+                .icon(icon)
+                .priority(10)
+                .panel(uiPanel)
+                .build();
 
-		uiNavigationButton = NavigationButton.builder()
-			.tooltip("Runecrafting Tracker")
-			.icon(icon)
-			.priority(10)
-			.panel(uiPanel)
-			.build();
+        clientToolbar.addNavigation(uiNavigationButton);
+    }
 
-		clientToolbar.addNavigation(uiNavigationButton);
-	}
+    @Override
+    protected void shutDown() throws Exception
+    {
+        clientToolbar.removeNavigation(uiNavigationButton);
+    }
 
-	@Override
-	protected void shutDown() throws Exception
-	{
-		clientToolbar.removeNavigation(uiNavigationButton);
-	}
+    private void init()
+    {
+        for (int i = 0; i < Runes.values().length; i++)
+        {
+            runeTracker.add(new PanelItemData(
+                    Runes.values()[i].name(),
+                    runeIDs[i],
+                    false,
+                    0,
+                    manager.getItemPrice(runeIDs[i])));
+        }
+    }
 
-	private void init()
-	{
-		for (int i = 0; i < Runes.values().length; i++)
-		{
-			runeTracker.add(new PanelItemData(
-				Runes.values()[i].name(),
-				runeIDs[i],
-				false,
-				0,
-				manager.getItemPrice(runeIDs[i])));
-		}
-	}
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event)
+    {
+        if (event.getGameState() == GameState.LOGGING_IN)
+        {
+            if (runeTracker.isEmpty()) {
+                clientThread.invokeLater(this::init);
+            }
+        }
+    }
 
-	@Subscribe
-	public void onGameStateChanged(GameStateChanged event)
-	{
-		if (event.getGameState() == GameState.LOGGING_IN)
-		{
-			if (runeTracker.size() == 0) {
-				clientThread.invokeLater(this::init);
-			}
-		}
-	}
+    @Subscribe
+    public void onStatChanged(StatChanged event)
+    {
+        if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null ||
+                event.getSkill() != Skill.RUNECRAFT)
+        {
+            return;
+        }
+        ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+        processChange(inventory);
+    }
 
-	@Subscribe
-	public void onAnimationChanged(AnimationChanged event)
-	{
-		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
-		{
-			return;
-		}
+    private void processChange(ItemContainer current)
+    {
+        // Create inventory multiset {id -> quantity}
+        Multiset<Integer> currentInventory = HashMultiset.create();
+        Arrays.stream(current.getItems())
+                .forEach(item -> currentInventory.add(item.getId(), item.getQuantity()));
 
-		String playerName = client.getLocalPlayer().getName();
-		String actorName = event.getActor().getName();
+        // Get inventory diff with snapshot
+        final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
 
-		if (playerName.equals(actorName))
-		{
-			int animId = event.getActor().getAnimation();
-			if (animId == RUNECRAFTING_ANIMATION_ID)
-			{
-				takeInventorySnapshot();
-			}
-			else
-			{
-				inventorySnapshot = null;
-			}
-		}
-	}
+        // Convert multiset diff to ItemStack list
+        List<ItemStack> items = diff.entrySet().stream()
+                .map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
+                .collect(Collectors.toList());
 
-	@Subscribe
-	public void onItemContainerChanged(ItemContainerChanged event)
-	{
-		if (event.getContainerId() != InventoryID.INVENTORY.getId())
-		{
-			return;
-		}
+        LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
 
-		processChange(event.getItemContainer());
-	}
+        if (items.size() > 0) {
+            for (ItemStack stack : items)
+            {
+                for (PanelItemData item : panels)
+                {
+                    if (item.getId() == stack.getId())
+                    {
+                        if (!item.isVisible()) {
+                            item.setVisible(true);
+                        }
+                        item.setCrafted(item.getCrafted() + stack.getQuantity());
+                    }
+                }
+            }
+            inventorySnapshot = currentInventory;
 
-	private void processChange(ItemContainer current)
-	{
-		if (inventorySnapshot != null)
-		{
-			// Create inventory multiset {id -> quantity}
-			Multiset<Integer> currentInventory = HashMultiset.create();
-			Arrays.stream(current.getItems())
-				.forEach(item -> currentInventory.add(item.getId(), item.getQuantity()));
+            try
+            {
+                SwingUtilities.invokeAndWait(uiPanel::pack);
+            }
+            catch (InterruptedException | InvocationTargetException e)
+            {
+                e.printStackTrace();
+            }
 
-			// Get inventory diff with snapshot
-			final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
+            uiPanel.refresh();
+        }
+    }
 
-			// Convert multiset diff to ItemStack list
-			List<ItemStack> items = diff.entrySet().stream()
-				.map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
-				.collect(Collectors.toList());
+    private void takeInventorySnapshot()
+    {
+        final ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
+        if (itemContainer != null)
+        {
+            inventorySnapshot = HashMultiset.create();
+            Arrays.stream(itemContainer.getItems())
+                    .forEach(item -> inventorySnapshot.add(item.getId(), item.getQuantity()));
+        }
+    }
 
-			LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
+    protected LinkedList<PanelItemData> getRuneTracker()
+    {
+        return runeTracker;
+    }
 
-			if (items.size() > 0) {
-				for (ItemStack stack : items)
-				{
-					for (PanelItemData item : panels)
-					{
-						if (item.getId() == stack.getId())
-						{
-							if (!item.isVisible()) {
-								item.setVisible(true);
-							}
-							item.setCrafted(item.getCrafted() + stack.getQuantity());
-						}
-					}
-				}
-				inventorySnapshot = currentInventory;
-
-				try
-				{
-					SwingUtilities.invokeAndWait(uiPanel::pack);
-				}
-				catch (InterruptedException | InvocationTargetException e)
-				{
-					e.printStackTrace();
-				}
-
-				uiPanel.refresh();
-			}
-		}
-	}
-
-	private void takeInventorySnapshot()
-	{
-		final ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
-		if (itemContainer != null)
-		{
-			inventorySnapshot = HashMultiset.create();
-			Arrays.stream(itemContainer.getItems())
-				.forEach(item -> inventorySnapshot.add(item.getId(), item.getQuantity()));
-		}
-	}
-
-	protected LinkedList<PanelItemData> getRuneTracker()
-	{
-		return runeTracker;
-	}
-
-	enum Runes
-	{AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH, MIST, DUST, MUD, SMOKE, STEAM, LAVA}
+    enum Runes
+    {AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH, MIST, DUST, MUD, SMOKE, STEAM, LAVA}
 }
