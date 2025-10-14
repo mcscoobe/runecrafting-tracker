@@ -32,6 +32,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -41,12 +42,12 @@ import net.runelite.api.events.*;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
+import net.runelite.api.gameval.InventoryID;
 
 @Slf4j
 @PluginDescriptor(
@@ -56,8 +57,6 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
-    private static final int RUNECRAFTING_ANIMATION_ID = 791;
-
     private RunecraftingTrackerPanel uiPanel;
 
     private final int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
@@ -65,6 +64,7 @@ public class RunecraftingTrackerPlugin extends Plugin
     private NavigationButton uiNavigationButton;
     private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
     private Multiset<Integer> inventorySnapshot;
+    private final Set<Integer> runeIdSet = Arrays.stream(runeIDs).boxed().collect(Collectors.toSet());
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -81,6 +81,8 @@ public class RunecraftingTrackerPlugin extends Plugin
     @Override
     protected void startUp() throws Exception
     {
+        log.debug("RunecraftingTrackerPlugin startUp: initializing UI and priming snapshot");
+        log.debug("Expected inventory container id: {}", InventoryID.INV);
         final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
         uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
 
@@ -92,6 +94,13 @@ public class RunecraftingTrackerPlugin extends Plugin
                 .build();
 
         clientToolbar.addNavigation(uiNavigationButton);
+        log.debug("Navigation button added to client toolbar");
+
+        // Prime an initial snapshot so the first ItemContainerChanged can be diffed
+        clientThread.invokeLater(() -> {
+            takeInventorySnapshot();
+            log.debug("Initial inventory snapshot taken at startup");
+        });
     }
 
     @Override
@@ -102,6 +111,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 
     private void init()
     {
+        log.debug("Initializing rune tracker items ({} runes)", Runes.values().length);
         for (int i = 0; i < Runes.values().length; i++)
         {
             runeTracker.add(new PanelItemData(
@@ -110,86 +120,233 @@ public class RunecraftingTrackerPlugin extends Plugin
                     false,
                     0,
                     manager.getItemPrice(runeIDs[i])));
+            log.debug("Added panel item for rune {} (id={})", Runes.values()[i].name(), runeIDs[i]);
         }
     }
 
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
-        if (event.getGameState() == GameState.LOGGING_IN)
+        log.debug("GameStateChanged: {}", event.getGameState());
+        if (event.getGameState() == GameState.LOGGED_IN)
         {
-            if (runeTracker.isEmpty()) {
+            if (runeTracker.isEmpty())
+            {
+                log.debug("Rune tracker empty at LOGGED_IN; initializing");
                 clientThread.invokeLater(this::init);
             }
+            // Refresh snapshot on login
+            clientThread.invokeLater(() -> {
+                takeInventorySnapshot();
+                log.debug("Inventory snapshot refreshed at LOGGED_IN");
+            });
         }
     }
 
     @Subscribe
     public void onStatChanged(StatChanged event)
     {
+        log.debug("StatChanged: skill={} xp={} level={}", event.getSkill(), event.getXp(), event.getLevel());
         if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null ||
                 event.getSkill() != Skill.RUNECRAFT)
         {
             return;
         }
-        ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
-        processChange(inventory);
+        // Don't overwrite baseline after crafting; only take a snapshot if one doesn't exist yet
+        if (inventorySnapshot == null)
+        {
+            log.debug("Runecraft stat changed; baseline missing; taking inventory snapshot");
+            takeInventorySnapshot();
+        }
+        else
+        {
+            log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
+        }
+    }
+
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        // Only react to local player's main inventory changes
+        if (event == null)
+        {
+            return;
+        }
+
+        final ItemContainer container = event.getItemContainer();
+        final int containerId = event.getContainerId();
+        log.debug("ItemContainerChanged: containerId={} itemsLength={} snapshotPresent={}",
+                containerId,
+                container == null ? -1 : (container.getItems() == null ? -1 : container.getItems().length),
+                inventorySnapshot != null);
+
+        if (container == null)
+        {
+            return;
+        }
+
+        // Accept when the event is for the inventory container by id or by identity equality
+        final ItemContainer currentInventoryContainer = client.getItemContainer(InventoryID.INV);
+        final boolean isInventoryById = (containerId == InventoryID.INV);
+        final boolean isInventoryByIdentity = (currentInventoryContainer != null && container == currentInventoryContainer);
+        if (!isInventoryById && !isInventoryByIdentity)
+        {
+            log.debug("Ignoring ItemContainerChanged: not inventory (byId={} byIdentity={})", isInventoryById, isInventoryByIdentity);
+            return;
+        }
+
+        if (inventorySnapshot == null)
+        {
+            // No baseline to diff from; take a snapshot so future changes can be diffed
+            log.debug("No inventory snapshot present; taking snapshot and deferring processing");
+            takeInventorySnapshot();
+            return;
+        }
+
+        processChange(container);
     }
 
     private void processChange(ItemContainer current)
     {
-        // Create inventory multiset {id -> quantity}
+        if (current == null || client.getLocalPlayer() == null)
+        {
+            return;
+        }
+
+        // Create inventory multiset {itemId -> quantity}, ignoring empty slots and invalid ids
         Multiset<Integer> currentInventory = HashMultiset.create();
         Arrays.stream(current.getItems())
+                .filter(item -> item != null && item.getId() > 0 && item.getQuantity() > 0)
                 .forEach(item -> currentInventory.add(item.getId(), item.getQuantity()));
 
-        // Get inventory diff with snapshot
+        if (log.isDebugEnabled())
+        {
+            // Log summary of rune counts in current inventory
+            String currentRuneSummary = currentInventory.entrySet().stream()
+                    .filter(e -> runeIdSet.contains(e.getElement()))
+                    .map(e -> e.getElement() + "x" + e.getCount())
+                    .collect(Collectors.joining(", "));
+            log.debug("Current rune counts: [{}]", currentRuneSummary);
+            log.debug("Current inventory snapshot size={} distinctItems={}",
+                    currentInventory.size(), currentInventory.elementSet().size());
+        }
+
+        if (inventorySnapshot == null)
+        {
+            // If somehow missing, set it now and bail
+            inventorySnapshot = currentInventory;
+            log.debug("Inventory snapshot was null inside processChange; set to current and return");
+            return;
+        }
+
+        // Get inventory increases relative to snapshot
         final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
 
-        // Convert multiset diff to ItemStack list
-        List<ItemStack> items = diff.entrySet().stream()
-                .map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
+        // Iterate positive deltas directly (avoid deprecated ItemStack constructor)
+        List<Multiset.Entry<Integer>> deltas = diff.entrySet().stream()
+                .filter(e -> e.getCount() > 0)
                 .collect(Collectors.toList());
 
-        LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
+        // Focus on rune deltas only for updating UI and snapshot
+        List<Multiset.Entry<Integer>> runeDeltas = deltas.stream()
+                .filter(e -> runeIdSet.contains(e.getElement()))
+                .collect(Collectors.toList());
 
-        if (items.size() > 0) {
-            for (ItemStack stack : items)
+        if (log.isDebugEnabled() && !deltas.isEmpty())
+        {
+            log.debug("Found {} positive deltas ({} rune deltas)", deltas.size(), runeDeltas.size());
+            for (Multiset.Entry<Integer> delta : deltas)
             {
+                final int id = delta.getElement();
+                final int qty = delta.getCount();
+                final boolean isRune = runeIdSet.contains(id);
+                log.debug("Delta: +{} of itemId={}{}", qty, id, isRune ? " (rune)" : "");
+            }
+        }
+
+        if (!runeDeltas.isEmpty())
+        {
+            LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
+
+            for (Multiset.Entry<Integer> delta : runeDeltas)
+            {
+                final int id = delta.getElement();
+                final int qty = delta.getCount();
                 for (PanelItemData item : panels)
                 {
-                    if (item.getId() == stack.getId())
+                    if (item.getId() == id)
                     {
-                        if (!item.isVisible()) {
+                        if (!item.isVisible())
+                        {
                             item.setVisible(true);
+                            log.debug("Making rune id={} visible in panel", id);
                         }
-                        item.setCrafted(item.getCrafted() + stack.getQuantity());
+                        int newCrafted = item.getCrafted() + qty;
+                        item.setCrafted(newCrafted);
+                        log.debug("Updated crafted count for rune id={} to {} (+{})", id, newCrafted, qty);
                     }
                 }
             }
+
+            // Update snapshot to current state for next diff only after applying rune deltas
             inventorySnapshot = currentInventory;
+            log.debug("Inventory snapshot updated after processing rune deltas");
 
             try
             {
-                SwingUtilities.invokeAndWait(uiPanel::pack);
+                SwingUtilities.invokeAndWait(() -> {
+                    uiPanel.pack();
+                    log.debug("UI panel packed after updates");
+                });
             }
             catch (InterruptedException | InvocationTargetException e)
             {
-                e.printStackTrace();
+                log.warn("Failed to update Runecrafting panel layout synchronously", e);
+                // Fallback to async to avoid blocking
+                SwingUtilities.invokeLater(() -> {
+                    uiPanel.pack();
+                    log.debug("UI panel packed (async fallback)");
+                });
             }
 
             uiPanel.refresh();
+            log.debug("UI panel refreshed (revalidate + repaint)");
+        }
+        else if (!deltas.isEmpty())
+        {
+            // There were positive deltas but none for runes; preserve baseline to catch upcoming rune additions
+            log.debug("Positive deltas detected but none were runes; preserving baseline snapshot for next event");
+        }
+        else
+        {
+            // No positive deltas; keep baseline as-is to await rune additions
+            log.debug("No positive deltas; preserving baseline snapshot for next event");
         }
     }
 
     private void takeInventorySnapshot()
     {
-        final ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
+        final ItemContainer itemContainer = client.getItemContainer(InventoryID.INV);
         if (itemContainer != null)
         {
             inventorySnapshot = HashMultiset.create();
             Arrays.stream(itemContainer.getItems())
+                    .filter(item -> item != null && item.getId() > 0 && item.getQuantity() > 0)
                     .forEach(item -> inventorySnapshot.add(item.getId(), item.getQuantity()));
+            if (log.isDebugEnabled())
+            {
+                // Log summary of rune counts in snapshot
+                String snapshotRuneSummary = inventorySnapshot.entrySet().stream()
+                        .filter(e -> runeIdSet.contains(e.getElement()))
+                        .map(e -> e.getElement() + "x" + e.getCount())
+                        .collect(Collectors.joining(", "));
+                log.debug("Snapshot taken: size={} distinctItems={} runes=[{}]",
+                        inventorySnapshot.size(), inventorySnapshot.elementSet().size(), snapshotRuneSummary);
+            }
+        }
+        else
+        {
+            log.debug("Snapshot skipped: inventory ItemContainer is null");
         }
     }
 

@@ -109,7 +109,8 @@ public class RunecraftingTrackerPanel extends PluginPanel
 
 	protected void refresh()
 	{
-		revalidate();
+		layoutContainer.revalidate();
+		layoutContainer.repaint();
 	}
 
 	protected LinkedList<PanelItemData> getRuneTracker()
