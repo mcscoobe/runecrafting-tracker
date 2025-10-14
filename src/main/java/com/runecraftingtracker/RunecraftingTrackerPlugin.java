@@ -61,20 +61,24 @@ public class RunecraftingTrackerPlugin extends Plugin
 
     private final int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
     private NavigationButton uiNavigationButton;
-    private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
+    private final LinkedList<PanelItemData> runeTracker = new LinkedList<>();
     private Multiset<Integer> inventorySnapshot;
     private final Set<Integer> runeIdSet = Arrays.stream(runeIDs).boxed().collect(Collectors.toSet());
 
     @Inject
+    @SuppressWarnings("unused")
     private ClientToolbar clientToolbar;
 
     @Inject
+    @SuppressWarnings("unused")
     private Client client;
 
     @Inject
+    @SuppressWarnings("unused")
     private ClientThread clientThread;
 
     @Inject
+    @SuppressWarnings("unused")
     private ItemManager manager;
 
     @Override

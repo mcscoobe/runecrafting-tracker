@@ -3,32 +3,45 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
+	mavenCentral()
 	maven {
 		url = 'https://repo.runelite.net'
 	}
-	mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
+def runeLiteVersion = '1.11.20.1'
 
 dependencies {
-	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
+	// RuneLite client is provided at runtime by the client/runtime environment, so keep it compileOnly for plugin development
+	compileOnly "net.runelite:client:${runeLiteVersion}"
 
-	compileOnly 'org.projectlombok:lombok:1.18.4'
-	annotationProcessor 'org.projectlombok:lombok:1.18.4'
+	// Lombok for compile-time only
+	compileOnly 'org.projectlombok:lombok:1.18.24'
+	annotationProcessor 'org.projectlombok:lombok:1.18.24'
 
-	testImplementation 'junit:junit:4.12'
-	testImplementation 'org.slf4j:slf4j-simple:1.7.12'
-	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion, {
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
+	// Tests: JUnit and a lightweight SLF4J binding at test runtime so tests and test-run configs have a logger
+	testImplementation 'junit:junit:4.13.2'
+	testRuntimeOnly 'org.slf4j:slf4j-simple:1.7.36'
+
+	// Provide RuneLite client for test compilation and runtime so test code can reference and load client classes
+	testCompileOnly "net.runelite:client:${runeLiteVersion}"
+	testRuntimeOnly "net.runelite:client:${runeLiteVersion}"
 }
 
 group = 'com.runecraftingtracker'
 version = '1.0-SNAPSHOT'
 sourceCompatibility = '1.8'
 
-tasks.withType(JavaCompile) {
+tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
+}
+
+// Run RuneLite using the test runtime classpath so the client classes are available at runtime for plugin development
+tasks.register('runRuneLite', JavaExec) {
+    group = 'run'
+    description = 'Run RuneLite with the plugin on the test runtime classpath'
+    main = 'net.runelite.client.RuneLite'
+    classpath = sourceSets.test.runtimeClasspath
+    // Adjust memory as needed
+    jvmArgs = ['-Xmx1G']
 }
