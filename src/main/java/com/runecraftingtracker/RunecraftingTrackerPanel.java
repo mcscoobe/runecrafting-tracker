@@ -46,11 +46,11 @@ public class RunecraftingTrackerPanel extends PluginPanel
 	// When there is nothing tracked, display this
 	private final PluginErrorPanel errorPanel = new PluginErrorPanel();
 	private final JPanel layoutContainer;
-	private ItemManager itemManager;
-	private LinkedList<PanelItemData> runeTracker;
+	private final ItemManager itemManager;
+	private final LinkedList<PanelItemData> runeTracker;
 
 	private final ImageIcon COIN_ICON =
-			new ImageIcon(ImageUtil.getResourceStreamFromClass(RunecraftingTrackerPlugin.class,"COIN.png"));
+			new ImageIcon(ImageUtil.loadImageResource(RunecraftingTrackerPlugin.class, "COIN.png"));
 
 	private static final String HTML_LABEL_TEMPLATE =
 			"<html><body style='color:%s'>%s<span style='color:white'>%s</span></body></html>";
@@ -83,11 +83,9 @@ public class RunecraftingTrackerPanel extends PluginPanel
 
 		AtomicInteger totalProfit = new AtomicInteger(0);
 
-		runeTracker.forEach((temp) -> {
-			totalProfit.addAndGet(temp.getCrafted() * temp.getCostPerRune());
-		});
+		runeTracker.forEach((temp) -> totalProfit.addAndGet(temp.getCrafted() * temp.getCostPerRune()));
 
-		if (runeTracker.size() == 0)
+		if (runeTracker.isEmpty())
 		{
 			layoutContainer.add(errorPanel);
 		} else {
@@ -118,9 +116,9 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		return runeTracker;
 	}
 
-	private static String createLabel(String label, long value)
+	private static String createLabel(long value)
 	{
-		return createLabel(label, value, "");
+		return createLabel("Crafted: ", value, "");
 	}
 
 	private static String createLabel(String label, long value, String valueSuffix)
@@ -145,7 +143,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		textContainer.setLayout(new GridLayout(2, 1));
 		textContainer.setBorder(new EmptyBorder(5, 5, 5, 10));
 
-		JLabel topLine = new JLabel(createLabel("Crafted: ", textTop_crafted));
+		JLabel topLine = new JLabel(createLabel(textTop_crafted));
 		topLine.setForeground(Color.WHITE);
 		topLine.setFont(FontManager.getRunescapeSmallFont());
 
@@ -183,36 +181,41 @@ public class RunecraftingTrackerPanel extends PluginPanel
 
 		panelContainer.add(textContainer, BorderLayout.CENTER);
 
-		final JMenuItem resetAll = new JMenuItem("Reset All");
-
-		resetAll.addActionListener(e ->
-		{
-			final int result = JOptionPane.showOptionDialog(panelContainer, String.format("<html>This will permanently delete <b>all</b> crafted runes.</html>"),
-					"Are you sure?", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
-					null, new String[]{"Yes", "No"}, "No");
-
-			if (result != JOptionPane.YES_OPTION)
-			{
-				return;
-			}
-
-
-			for (PanelItemData item : runeTracker)
-			{
-				item.setCrafted(0);
-				item.setVisible(false);
-			}
-
-			layoutContainer.removeAll();
-			layoutContainer.add(errorPanel);
-
-		});
-
-		final JPopupMenu popupMenu = new JPopupMenu();
-		popupMenu.setBorder(new EmptyBorder(5, 5, 5, 5));
-		popupMenu.add(resetAll);
-		panelContainer.setComponentPopupMenu(popupMenu);
+        final JPopupMenu popupMenu = getJPopupMenu(panelContainer);
+        panelContainer.setComponentPopupMenu(popupMenu);
 
 		return panelContainer;
 	}
+
+    private JPopupMenu getJPopupMenu(JPanel panelContainer) {
+        final JMenuItem resetAll = new JMenuItem("Reset All");
+
+        resetAll.addActionListener(e ->
+        {
+            final int result = JOptionPane.showOptionDialog(panelContainer, "<html>This will permanently delete <b>all</b> crafted runes.</html>",
+                    "Are you sure?", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
+                    null, new String[]{"Yes", "No"}, "No");
+
+            if (result != JOptionPane.YES_OPTION)
+            {
+                return;
+            }
+
+
+            for (PanelItemData item : runeTracker)
+            {
+                item.setCrafted(0);
+                item.setVisible(false);
+            }
+
+            layoutContainer.removeAll();
+            layoutContainer.add(errorPanel);
+
+        });
+
+        final JPopupMenu popupMenu = new JPopupMenu();
+        popupMenu.setBorder(new EmptyBorder(5, 5, 5, 5));
+        popupMenu.add(resetAll);
+        return popupMenu;
+    }
 }

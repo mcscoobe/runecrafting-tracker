@@ -86,7 +86,8 @@ public class RunecraftingTrackerPlugin extends Plugin
     {
         log.debug("RunecraftingTrackerPlugin startUp: initializing UI and priming snapshot");
         log.debug("Expected inventory container id: {}", InventoryID.INV);
-        final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
+        // ImageUtil.getResourceStreamFromClass is deprecated — use loadImageResource which returns a BufferedImage
+        final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
         uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
 
         uiNavigationButton = NavigationButton.builder()
@@ -126,7 +127,7 @@ public class RunecraftingTrackerPlugin extends Plugin
             log.debug("Added panel item for rune {} (id={})", Runes.values()[i].name(), runeIDs[i]);
         }
     }
-
+    @SuppressWarnings("unused")
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
@@ -145,7 +146,7 @@ public class RunecraftingTrackerPlugin extends Plugin
             });
         }
     }
-
+    @SuppressWarnings("unused")
     @Subscribe
     public void onStatChanged(StatChanged event)
     {
@@ -166,7 +167,7 @@ public class RunecraftingTrackerPlugin extends Plugin
             log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
         }
     }
-
+    @SuppressWarnings("unused")
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
     {
