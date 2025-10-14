@@ -26,7 +26,6 @@ package com.runecraftingtracker;
 
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
@@ -82,7 +81,7 @@ public class RunecraftingTrackerPlugin extends Plugin
     private ItemManager manager;
 
     @Override
-    protected void startUp() throws Exception
+    protected void startUp()
     {
         log.debug("RunecraftingTrackerPlugin startUp: initializing UI and priming snapshot");
         log.debug("Expected inventory container id: {}", InventoryID.INV);
@@ -108,7 +107,7 @@ public class RunecraftingTrackerPlugin extends Plugin
     }
 
     @Override
-    protected void shutDown() throws Exception
+    protected void shutDown()
     {
         clientToolbar.removeNavigation(uiNavigationButton);
     }
@@ -179,23 +178,20 @@ public class RunecraftingTrackerPlugin extends Plugin
 
         final ItemContainer container = event.getItemContainer();
         final int containerId = event.getContainerId();
-        log.debug("ItemContainerChanged: containerId={} itemsLength={} snapshotPresent={}",
-                containerId,
-                container == null ? -1 : (container.getItems() == null ? -1 : container.getItems().length),
-                inventorySnapshot != null);
 
+        // If there's no container in the event, nothing to do
         if (container == null)
         {
             return;
         }
 
-        // Accept when the event is for the inventory container by id or by identity equality
-        final ItemContainer currentInventoryContainer = client.getItemContainer(InventoryID.INV);
-        final boolean isInventoryById = (containerId == InventoryID.INV);
-        final boolean isInventoryByIdentity = (currentInventoryContainer != null && container == currentInventoryContainer);
-        if (!isInventoryById && !isInventoryByIdentity)
+        // Log the container id and current items length
+        log.debug("ItemContainerChanged: containerId={} itemsLength={} snapshotPresent={}", containerId, container.getItems().length, inventorySnapshot != null);
+
+        // Accept only events for the player's main inventory container by id
+        if (containerId != InventoryID.INV)
         {
-            log.debug("Ignoring ItemContainerChanged: not inventory (byId={} byIdentity={})", isInventoryById, isInventoryByIdentity);
+            log.debug("Ignoring ItemContainerChanged: not inventory (containerId={})", containerId);
             return;
         }
 
@@ -244,7 +240,18 @@ public class RunecraftingTrackerPlugin extends Plugin
         }
 
         // Get inventory increases relative to snapshot
-        final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
+        // Manually compute positive deltas (current - snapshot) to avoid using Guava's @Beta Multisets.difference
+        final Multiset<Integer> diff = HashMultiset.create();
+        for (Integer id : currentInventory.elementSet())
+        {
+            int currentCount = currentInventory.count(id);
+            int previousCount = (inventorySnapshot == null) ? 0 : inventorySnapshot.count(id);
+            int delta = currentCount - previousCount;
+            if (delta > 0)
+            {
+                diff.add(id, delta);
+            }
+        }
 
         // Iterate positive deltas directly (avoid deprecated ItemStack constructor)
         List<Multiset.Entry<Integer>> deltas = diff.entrySet().stream()
@@ -354,6 +361,7 @@ public class RunecraftingTrackerPlugin extends Plugin
         }
     }
 
+    @SuppressWarnings("unused")
     protected LinkedList<PanelItemData> getRuneTracker()
     {
         return runeTracker;
