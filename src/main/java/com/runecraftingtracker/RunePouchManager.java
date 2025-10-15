@@ -175,26 +175,4 @@ public final class RunePouchManager
             .map(e -> ITEM_NAME_LOOKUP.getOrDefault(e.getKey(), String.valueOf(e.getKey())) + " x" + e.getValue())
             .collect(Collectors.joining(", "));
     }
-
-    /**
-     * @return true if the given varbit id corresponds to rune pouch type or quantity varbits.
-     */
-    public boolean isRunePouchVarBit(int varBitId)
-    {
-        for (int id : RUNE_VAR_BITS)
-        {
-            if (id == varBitId)
-            {
-                return true;
-            }
-        }
-        for (int id : AMOUNT_VAR_BITS)
-        {
-            if (id == varBitId)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
 }
