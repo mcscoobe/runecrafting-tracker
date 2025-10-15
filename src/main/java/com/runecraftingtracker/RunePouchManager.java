@@ -7,16 +7,21 @@ import java.util.Collections;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Centralizes all Rune Pouch related logic: detection and contents reading.
  */
+@Slf4j
 @Singleton
 public final class RunePouchManager
 {
@@ -34,50 +39,56 @@ public final class RunePouchManager
         VarbitID.RUNE_POUCH_QUANTITY_4
     };
 
-    // Mapping from rune index (as stored in the rune pouch varbits) to rune item ids.
-    // Varbit values are typically 1-based (0 = empty). Keep order aligned to gameval constants.
-    private static final int[] RUNE_INDEX_TO_ITEM_ID = new int[] {
-        ItemID.AIRRUNE,   // 1
-        ItemID.MINDRUNE,  // 2
-        ItemID.WATERRUNE, // 3
-        ItemID.EARTHRUNE, // 4
-        ItemID.FIRERUNE,  // 5
-        ItemID.BODYRUNE,  // 6
-        ItemID.COSMICRUNE,// 7
-        ItemID.CHAOSRUNE, // 8
-        ItemID.ASTRALRUNE,// 9
-        ItemID.NATURERUNE,// 10
-        ItemID.LAWRUNE,   // 11
-        ItemID.DEATHRUNE, // 12
-        ItemID.BLOODRUNE, // 13
-        ItemID.SOULRUNE,  // 14
-        ItemID.WRATHRUNE, // 15
-        ItemID.MISTRUNE,  // 16
-        ItemID.DUSTRUNE,  // 17
-        ItemID.MUDRUNE,   // 18
-        ItemID.SMOKERUNE, // 19
-        ItemID.STEAMRUNE, // 20
-        ItemID.LAVARUNE,  // 21
-        ItemID.AETHERRUNE // 22 (if present in this client)
+    // Canonical mapping from pouch type index (1-based; 0 = empty) to rune item IDs
+    private static final int[] INDEX_TO_ITEM_ID = new int[] {
+        ItemID.AIRRUNE,    // 1 Air
+        ItemID.WATERRUNE,  // 2 Water
+        ItemID.EARTHRUNE,  // 3 Earth
+        ItemID.FIRERUNE,   // 4 Fire
+        ItemID.MINDRUNE,   // 5 Mind
+        ItemID.CHAOSRUNE,  // 6 Chaos
+        ItemID.DEATHRUNE,  // 7 Death
+        ItemID.BLOODRUNE,  // 8 Blood
+        ItemID.BODYRUNE,   // 9 Body
+        ItemID.NATURERUNE, // 10 Nature
+        ItemID.LAWRUNE,    // 11 Law
+        ItemID.COSMICRUNE, // 12 Cosmic
+        ItemID.SOULRUNE,   // 13 Soul
+        ItemID.ASTRALRUNE, // 14 Astral
+        ItemID.MISTRUNE,   // 15 Mist
+        ItemID.DUSTRUNE,   // 16 Dust
+        ItemID.MUDRUNE,    // 17 Mud
+        ItemID.SMOKERUNE,  // 18 Smoke
+        ItemID.STEAMRUNE,  // 19 Steam
+        ItemID.LAVARUNE,   // 20 Lava
+        ItemID.WRATHRUNE   // 21 Wrath
     };
 
-    // Human-friendly names aligned with RUNE_INDEX_TO_ITEM_ID order
+    // Human-friendly names aligned with INDEX_TO_ITEM_ID order
     private static final String[] RUNE_NAMES = new String[] {
-        "Air", "Mind", "Water", "Earth", "Fire", "Body", "Cosmic", "Chaos", "Astral",
-        "Nature", "Law", "Death", "Blood", "Soul", "Wrath", "Mist", "Dust", "Mud",
-        "Smoke", "Steam", "Lava", "Aether"
+        "Air", "Water", "Earth", "Fire", "Mind", "Chaos", "Death", "Blood", "Body",
+        "Nature", "Law", "Cosmic", "Soul", "Astral", "Mist", "Mud", "Dust", "Smoke",
+        "Steam", "Lava", "Wrath"
     };
 
     // itemId -> display name map
     private static final Map<Integer, String> ITEM_NAME_LOOKUP;
     static {
         Map<Integer, String> m = new HashMap<>();
-        for (int i = 0; i < RUNE_INDEX_TO_ITEM_ID.length; i++)
+        for (int i = 0; i < INDEX_TO_ITEM_ID.length; i++)
         {
-            m.put(RUNE_INDEX_TO_ITEM_ID[i], RUNE_NAMES[i]);
+            m.put(INDEX_TO_ITEM_ID[i], RUNE_NAMES[i]);
         }
         ITEM_NAME_LOOKUP = Collections.unmodifiableMap(m);
     }
+
+    // Known rune pouch item ids (inventory variants)
+    private static final Set<Integer> POUCH_IDS = new HashSet<>(Arrays.asList(
+        ItemID.DIVINE_RUNE_POUCH,
+        ItemID.DIVINE_RUNE_POUCH_TROUVER,
+        ItemID.BH_RUNE_POUCH,
+        ItemID.BH_RUNE_POUCH_TROUVER
+    ));
 
     private final Client client;
 
@@ -88,35 +99,86 @@ public final class RunePouchManager
     }
 
     /**
-     * @return true if no rune pouch variant is present in the player's inventory.
+     * @return true if no rune pouch variant is present. Detect via varbits first, then inventory container as fallback.
      */
     public boolean hasNoRunePouch()
     {
-        final ItemContainer inv = client.getItemContainer(InventoryID.INV);
-        if (inv == null)
+        // Check varbits first: if any slot has a type or qty > 0, a pouch is effectively present
+        boolean anyType = false;
+        boolean anyQty = false;
+        for (int i = 0; i < RUNE_VAR_BITS.length; i++)
         {
-            return true;
+            int t = client.getVarbitValue(RUNE_VAR_BITS[i]);
+            int q = client.getVarbitValue(AMOUNT_VAR_BITS[i]);
+            anyType |= t > 0;
+            anyQty |= q > 0;
         }
-        for (Item it : inv.getItems())
+        if (anyType || anyQty)
+        {
+            if (log.isDebugEnabled())
+            {
+                log.debug("Rune pouch detected via varbits: {}", varbitSummary());
+            }
+            return false;
+        }
+
+        // Fallback: look for a pouch item in the main inventory
+        if (containerHasPouch(InventoryID.INV))
+        {
+            if (log.isDebugEnabled())
+            {
+                log.debug("Rune pouch detected via inventory items");
+            }
+            return false;
+        }
+
+        if (log.isDebugEnabled())
+        {
+            log.debug("No rune pouch detected (varbits empty and no pouch item in inventory)");
+        }
+        return true;
+    }
+
+    private String varbitSummary()
+    {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < RUNE_VAR_BITS.length; i++)
+        {
+            int t = client.getVarbitValue(RUNE_VAR_BITS[i]);
+            int q = client.getVarbitValue(AMOUNT_VAR_BITS[i]);
+            if (i > 0) sb.append(", ");
+            sb.append("[t=").append(t).append(",q=").append(q).append("]");
+        }
+        return sb.toString();
+    }
+
+    private boolean containerHasPouch(int containerId)
+    {
+        final ItemContainer c = client.getItemContainer(containerId);
+        if (c == null)
+        {
+            return false;
+        }
+        for (Item it : c.getItems())
         {
             if (it == null)
             {
                 continue;
             }
             final int id = it.getId();
-            if (id == ItemID.BH_RUNE_POUCH
-                || id == ItemID.BH_RUNE_POUCH_TROUVER
-                || id == ItemID.DIVINE_RUNE_POUCH
-                || id == ItemID.DIVINE_RUNE_POUCH_TROUVER)
+            if (POUCH_IDS.contains(id))
             {
-                return false;
+                return true;
             }
         }
-        return true;
+        return false;
     }
+
+    private static boolean loggedKeyMappingOnce = false;
 
     /**
      * Reads rune contents from client varbits. Works for both regular (3 slots) and Divine (4 slots) pouches.
+     * Supports clients where type varbits store either an index (1..21) or the actual item id (>= 500).
      * @return LinkedHashMap of rune itemId -> quantity (preserves slot order)
      */
     public Map<Integer, Integer> readContents()
@@ -127,26 +189,63 @@ public final class RunePouchManager
             return out;
         }
 
+        if (!loggedKeyMappingOnce && log.isDebugEnabled())
+        {
+            // Log critical mapping range to confirm correctness in user logs
+            int[] idx = {9,10,11,12,13,14};
+            String m = Arrays.stream(idx)
+                .mapToObj(i -> i + "->" + INDEX_TO_ITEM_ID[i-1])
+                .collect(Collectors.joining(", "));
+            log.debug("Rune pouch index mapping (9..14): {}", m);
+            loggedKeyMappingOnce = true;
+        }
+
         final int slots = RUNE_VAR_BITS.length;
         for (int i = 0; i < slots; i++)
         {
             final int runeTypeVal = client.getVarbitValue(RUNE_VAR_BITS[i]);
             final int qty = client.getVarbitValue(AMOUNT_VAR_BITS[i]);
 
-            if (qty <= 0)
+            if (qty <= 0 || runeTypeVal <= 0)
             {
                 continue; // empty slot
             }
 
-            // Varbit is typically 1-based (0 = empty). Translate to 0-based index into our mapping array.
-            final int idx = runeTypeVal - 1;
-            if (idx < 0 || idx >= RUNE_INDEX_TO_ITEM_ID.length)
+            final int itemId;
+            if (runeTypeVal >= 500)
             {
-                continue; // unknown/empty
+                // Some client builds expose the actual item id directly in the varbit
+                itemId = runeTypeVal;
+            }
+            else
+            {
+                // 1-based index into our mapping
+                final int idx1 = runeTypeVal - 1;
+                if (idx1 < 0 || idx1 >= INDEX_TO_ITEM_ID.length)
+                {
+                    if (log.isDebugEnabled())
+                    {
+                        log.debug("Rune pouch: unknown index {} in slot {} (qty={})", runeTypeVal, i + 1, qty);
+                    }
+                    continue;
+                }
+                itemId = INDEX_TO_ITEM_ID[idx1];
             }
 
-            final int itemId = RUNE_INDEX_TO_ITEM_ID[idx];
+            if (log.isDebugEnabled())
+            {
+                log.debug("Rune pouch slot {}: type={} qty={} -> itemId={}", i + 1, runeTypeVal, qty, itemId);
+            }
+
             out.merge(itemId, qty, Integer::sum);
+        }
+
+        if (log.isDebugEnabled())
+        {
+            String contents = out.entrySet().stream()
+                .map(e -> ITEM_NAME_LOOKUP.getOrDefault(e.getKey(), String.valueOf(e.getKey())) + " x" + e.getValue())
+                .collect(Collectors.joining(", "));
+            log.debug("Rune pouch read: {}", contents.isEmpty() ? "(empty)" : contents);
         }
 
         return out;

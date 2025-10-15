@@ -47,6 +47,7 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import java.util.Map;
 import java.util.HashMap;
 
@@ -60,11 +61,35 @@ public class RunecraftingTrackerPlugin extends Plugin
 {
     private RunecraftingTrackerPanel uiPanel;
 
-    private final int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
+    private final int[] runeIDs = {
+        ItemID.AIRRUNE,
+        ItemID.MINDRUNE,
+        ItemID.WATERRUNE,
+        ItemID.EARTHRUNE,
+        ItemID.FIRERUNE,
+        ItemID.BODYRUNE,
+        ItemID.COSMICRUNE,
+        ItemID.CHAOSRUNE,
+        ItemID.ASTRALRUNE,
+        ItemID.NATURERUNE,
+        ItemID.LAWRUNE,
+        ItemID.DEATHRUNE,
+        ItemID.BLOODRUNE,
+        ItemID.SOULRUNE,
+        ItemID.WRATHRUNE,
+        ItemID.MISTRUNE,
+        ItemID.DUSTRUNE,
+        ItemID.MUDRUNE,
+        ItemID.SMOKERUNE,
+        ItemID.STEAMRUNE,
+        ItemID.LAVARUNE
+    };
     private NavigationButton uiNavigationButton;
     private final LinkedList<PanelItemData> runeTracker = new LinkedList<>();
     private Multiset<Integer> inventorySnapshot;
     private final Set<Integer> runeIdSet = Arrays.stream(runeIDs).boxed().collect(Collectors.toSet());
+    // New: direct index from itemId -> PanelItemData to avoid nested loops
+    private final Map<Integer, PanelItemData> panelById = new HashMap<>();
 
     @Inject
     @SuppressWarnings("unused")
@@ -89,6 +114,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 
     // Cache of last known rune pouch contents (itemId -> qty) to avoid noisy logs/refreshes
     private final Map<Integer, Integer> lastRunePouch = new HashMap<>();
+    private boolean pouchBaselineReady = false;
 
     @Override
     protected void startUp()
@@ -109,9 +135,16 @@ public class RunecraftingTrackerPlugin extends Plugin
         clientToolbar.addNavigation(uiNavigationButton);
         log.debug("Navigation button added to client toolbar");
 
-        // Prime an initial snapshot so the first ItemContainerChanged can be diffed
+        // Prime initial snapshots and pouch baseline on the client thread
         clientThread.invokeLater(() -> {
             takeInventorySnapshot();
+            if (runePouchManager != null && !runePouchManager.hasNoRunePouch())
+            {
+                lastRunePouch.clear();
+                lastRunePouch.putAll(runePouchManager.readContents());
+                pouchBaselineReady = true;
+                log.debug("Initialized rune pouch baseline at startup: {}", runePouchManager.toReadableString());
+            }
             log.debug("Initial inventory snapshot taken at startup");
         });
     }
@@ -121,6 +154,8 @@ public class RunecraftingTrackerPlugin extends Plugin
     {
         clientToolbar.removeNavigation(uiNavigationButton);
         lastRunePouch.clear();
+        panelById.clear();
+        pouchBaselineReady = false;
     }
 
     private void init()
@@ -128,13 +163,24 @@ public class RunecraftingTrackerPlugin extends Plugin
         log.debug("Initializing rune tracker items ({} runes)", Runes.values().length);
         for (int i = 0; i < Runes.values().length; i++)
         {
-            runeTracker.add(new PanelItemData(
+            final PanelItemData pid = new PanelItemData(
                     Runes.values()[i].name(),
                     runeIDs[i],
                     false,
                     0,
-                    manager.getItemPrice(runeIDs[i])));
+                    manager.getItemPrice(runeIDs[i]));
+            runeTracker.add(pid);
+            panelById.put(runeIDs[i], pid);
             log.debug("Added panel item for rune {} (id={})", Runes.values()[i].name(), runeIDs[i]);
+        }
+        // One-time mapping dump for key runes to verify UI rows align with item IDs
+        if (log.isDebugEnabled())
+        {
+            int[] keys = {559, 561, 563, 564}; // BODY, NATURE, LAW, COSMIC
+            String map = Arrays.stream(keys)
+                    .mapToObj(id -> id + "->" + (panelById.get(id) != null ? panelById.get(id).getName() : "(null)"))
+                    .collect(Collectors.joining(", "));
+            log.debug("Panel mapping: {}", map);
         }
     }
     @SuppressWarnings("unused")
@@ -149,9 +195,16 @@ public class RunecraftingTrackerPlugin extends Plugin
                 log.debug("Rune tracker empty at LOGGED_IN; initializing");
                 clientThread.invokeLater(this::init);
             }
-            // Refresh snapshot on login
+            // Refresh snapshot and pouch baseline on login
             clientThread.invokeLater(() -> {
                 takeInventorySnapshot();
+                if (runePouchManager != null && !runePouchManager.hasNoRunePouch())
+                {
+                    lastRunePouch.clear();
+                    lastRunePouch.putAll(runePouchManager.readContents());
+                    pouchBaselineReady = true;
+                    log.debug("Initialized rune pouch baseline at login: {}", runePouchManager.toReadableString());
+                }
                 log.debug("Inventory snapshot refreshed at LOGGED_IN");
             });
         }
@@ -166,62 +219,125 @@ public class RunecraftingTrackerPlugin extends Plugin
         {
             return;
         }
-        // Don't overwrite baseline after crafting; only take a snapshot if one doesn't exist yet
         if (inventorySnapshot == null)
         {
-            log.debug("Runecraft stat changed; baseline missing; taking inventory snapshot");
             takeInventorySnapshot();
         }
-        else
-        {
-            log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
-        }
+        // Also check pouch right away when Runecraft xp changes (craft happened)
+        updateRunePouchDeltas("stat");
     }
 
-    // Keep rune pouch contents up to date when varbits change
-    @SuppressWarnings("unused")
-    @Subscribe
-    public void onVarbitChanged(VarbitChanged event)
+    // Centralized method to compute and apply pouch deltas
+    private void updateRunePouchDeltas(String source)
     {
         if (runePouchManager == null || client == null)
         {
             return;
         }
-
-        // Early-return: only handle rune pouch-related varbits
-        final int changedVarBitId = event.getVarbitId();
-        if (changedVarBitId != -1 && !runePouchManager.isRunePouchVarBit(changedVarBitId))
-        {
-            return;
-        }
-
         if (runePouchManager.hasNoRunePouch())
         {
-            if (!lastRunePouch.isEmpty())
+            if (!lastRunePouch.isEmpty() || pouchBaselineReady)
             {
                 lastRunePouch.clear();
-                log.debug("Rune pouch not present; cleared cached contents");
+                pouchBaselineReady = false;
+                log.debug("Rune pouch not present; cleared cached contents ({} trigger)", source);
             }
             return;
         }
 
         Map<Integer, Integer> current = runePouchManager.readContents();
-        if (!current.equals(lastRunePouch))
+        if (!pouchBaselineReady)
         {
-            if (log.isDebugEnabled())
-            {
-                String contents = current.entrySet().stream()
-                    .map(e -> e.getKey() + "x" + e.getValue())
-                    .collect(Collectors.joining(", "));
-                log.debug("Rune pouch contents updated: [{}]", contents);
-                // Also log a human-readable summary
-                log.debug("Rune pouch (readable): {}", runePouchManager.toReadableString());
-            }
             lastRunePouch.clear();
             lastRunePouch.putAll(current);
-
-            // Optionally, refresh UI or trigger any dependent logic here if needed
+            pouchBaselineReady = true;
+            if (log.isDebugEnabled())
+            {
+                String currStr = current.entrySet().stream()
+                    .map(e -> e.getKey() + "x" + e.getValue())
+                    .collect(Collectors.joining(", "));
+                log.debug("Pouch baseline initialized ({}): curr=[{}]", source, currStr);
+            }
+            return; // do not count existing contents as crafted
         }
+
+        if (log.isDebugEnabled())
+        {
+            String prevStr = lastRunePouch.entrySet().stream()
+                .map(e -> e.getKey() + "x" + e.getValue())
+                .collect(Collectors.joining(", "));
+            String currStr = current.entrySet().stream()
+                .map(e -> e.getKey() + "x" + e.getValue())
+                .collect(Collectors.joining(", "));
+            log.debug("Pouch ({}): prev=[{}] curr=[{}]", source, prevStr, currStr);
+        }
+        if (current.equals(lastRunePouch))
+        {
+            return; // no change
+        }
+
+        // Compute positive deltas only
+        Map<Integer, Integer> deltas = new HashMap<>();
+        for (Map.Entry<Integer, Integer> e : current.entrySet())
+        {
+            int id = e.getKey();
+            int now = e.getValue() == null ? 0 : e.getValue();
+            int before = lastRunePouch.getOrDefault(id, 0);
+            int diff = now - before;
+            if (diff > 0 && runeIdSet.contains(id))
+            {
+                deltas.put(id, diff);
+            }
+        }
+        if (log.isDebugEnabled())
+        {
+            String dstr = deltas.entrySet().stream()
+                .map(e -> e.getKey() + "+" + e.getValue())
+                .collect(Collectors.joining(", "));
+            log.debug("Pouch ({}): positive deltas [{}]", source, dstr);
+        }
+
+        if (!deltas.isEmpty())
+        {
+            boolean updated = false;
+            for (Map.Entry<Integer, Integer> de : deltas.entrySet())
+            {
+                updated |= applyDeltaToPanel(de.getKey(), de.getValue(), source);
+            }
+            if (updated)
+            {
+                try
+                {
+                    SwingUtilities.invokeAndWait(() -> uiPanel.pack());
+                }
+                catch (InterruptedException | InvocationTargetException e)
+                {
+                    log.warn("Failed to pack UI synchronously ({} pouch)", source, e);
+                    SwingUtilities.invokeLater(uiPanel::pack);
+                }
+                uiPanel.refresh();
+            }
+        }
+
+        lastRunePouch.clear();
+        lastRunePouch.putAll(current);
+    }
+
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onVarbitChanged(VarbitChanged event)
+    {
+        log.debug("VarbitChanged received; checking pouch deltas");
+        // Read pouch on any varbit change; internal map comparison prevents needless work
+        updateRunePouchDeltas("varbit");
+    }
+
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onGameTick(GameTick tick)
+    {
+        // Fallback to catch pouch changes even if varbit events are missed
+        updateRunePouchDeltas("tick");
     }
 
     @SuppressWarnings("unused")
@@ -335,96 +451,148 @@ public class RunecraftingTrackerPlugin extends Plugin
 
         if (!runeDeltas.isEmpty())
         {
-            LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
-
+            boolean any = false;
             for (Multiset.Entry<Integer> delta : runeDeltas)
             {
-                final int id = delta.getElement();
-                final int qty = delta.getCount();
-                for (PanelItemData item : panels)
-                {
-                    if (item.getId() == id)
-                    {
-                        if (!item.isVisible())
-                        {
-                            item.setVisible(true);
-                            log.debug("Making rune id={} visible in panel", id);
-                        }
-                        int newCrafted = item.getCrafted() + qty;
-                        item.setCrafted(newCrafted);
-                        log.debug("Updated crafted count for rune id={} to {} (+{})", id, newCrafted, qty);
-                    }
-                }
+                any |= applyDeltaToPanel(delta.getElement(), delta.getCount(), "inventory");
             }
 
-            // Update snapshot to current state for next diff only after applying rune deltas
             inventorySnapshot = currentInventory;
-            log.debug("Inventory snapshot updated after processing rune deltas");
 
-            try
+            if (any)
             {
-                SwingUtilities.invokeAndWait(() -> {
-                    uiPanel.pack();
-                    log.debug("UI panel packed after updates");
-                });
+                try
+                {
+                    SwingUtilities.invokeAndWait(() -> uiPanel.pack());
+                }
+                catch (InterruptedException | InvocationTargetException e)
+                {
+                    log.warn("Failed to pack UI synchronously", e);
+                    SwingUtilities.invokeLater(uiPanel::pack);
+                }
+                uiPanel.refresh();
             }
-            catch (InterruptedException | InvocationTargetException e)
-            {
-                log.warn("Failed to update Runecrafting panel layout synchronously", e);
-                // Fallback to async to avoid blocking
-                SwingUtilities.invokeLater(() -> {
-                    uiPanel.pack();
-                    log.debug("UI panel packed (async fallback)");
-                });
-            }
-
-            uiPanel.refresh();
-            log.debug("UI panel refreshed (revalidate + repaint)");
         }
         else if (!deltas.isEmpty())
         {
-            // There were positive deltas but none for runes; preserve baseline to catch upcoming rune additions
             log.debug("Positive deltas detected but none were runes; preserving baseline snapshot for next event");
         }
         else
         {
-            // No positive deltas; keep baseline as-is to await rune additions
             log.debug("No positive deltas; preserving baseline snapshot for next event");
         }
+
+        // Always check pouch after inventory settles, in case runes went straight to pouch
+        updateRunePouchDeltas("inventory");
     }
 
-    private void takeInventorySnapshot()
+    // Helper to apply a single positive delta to the panel by item id
+    private boolean applyDeltaToPanel(int itemId, int qty, String source)
     {
-        final ItemContainer itemContainer = client.getItemContainer(InventoryID.INV);
-        if (itemContainer != null)
+        if (qty <= 0)
         {
-            inventorySnapshot = HashMultiset.create();
-            Arrays.stream(itemContainer.getItems())
-                    .filter(item -> item != null && item.getId() > 0 && item.getQuantity() > 0)
-                    .forEach(item -> inventorySnapshot.add(item.getId(), item.getQuantity()));
-            if (log.isDebugEnabled())
+            return false;
+        }
+
+        final PanelItemData row = panelById.get(itemId);
+        if (row == null)
+        {
+            // Fallback: try to locate by scanning the list once (should not normally happen)
+            for (PanelItemData p : runeTracker)
             {
-                // Log summary of rune counts in snapshot
-                String snapshotRuneSummary = inventorySnapshot.entrySet().stream()
-                        .filter(e -> runeIdSet.contains(e.getElement()))
-                        .map(e -> e.getElement() + "x" + e.getCount())
-                        .collect(Collectors.joining(", "));
-                log.debug("Snapshot taken: size={} distinctItems={} runes=[{}]",
-                        inventorySnapshot.size(), inventorySnapshot.elementSet().size(), snapshotRuneSummary);
+                if (p.getId() == itemId)
+                {
+                    panelById.put(itemId, p);
+                    // continue with this row
+                    return applyDeltaToPanel(itemId, qty, source);
+                }
+            }
+            log.debug("applyDeltaToPanel({}): itemId {} is not a tracked rune", source, itemId);
+            return false;
+        }
+
+        final int oldCrafted = row.getCrafted();
+        final int newCrafted = oldCrafted + qty;
+        row.setCrafted(newCrafted);
+        row.setVisible(true);
+
+        // Update price if we can; ignore failures gracefully
+        try
+        {
+            if (manager != null)
+            {
+                int price = manager.getItemPrice(itemId);
+                if (price > 0)
+                {
+                    row.setCostPerRune(price);
+                }
             }
         }
-        else
+        catch (Exception ex)
         {
-            log.debug("Snapshot skipped: inventory ItemContainer is null");
+            log.debug("Failed to update item price for {} via manager: {}", itemId, ex.getMessage());
+        }
+
+        if (log.isDebugEnabled())
+        {
+            log.debug("Applied delta to panel ({}): id={} +{} -> crafted={} (price={})",
+                source, itemId, qty, newCrafted, row.getCostPerRune());
+        }
+        return true;
+    }
+
+    // Take a fresh snapshot of the current inventory into inventorySnapshot
+    private void takeInventorySnapshot()
+    {
+        if (client == null)
+        {
+            inventorySnapshot = HashMultiset.create();
+            return;
+        }
+
+        final ItemContainer inv = client.getItemContainer(InventoryID.INV);
+        final Multiset<Integer> snap = HashMultiset.create();
+        if (inv != null)
+        {
+            Arrays.stream(inv.getItems())
+                .filter(it -> it != null && it.getId() > 0 && it.getQuantity() > 0)
+                .forEach(it -> snap.add(it.getId(), it.getQuantity()));
+        }
+        inventorySnapshot = snap;
+
+        if (log.isDebugEnabled())
+        {
+            String rs = snap.entrySet().stream()
+                .filter(e -> runeIdSet.contains(e.getElement()))
+                .map(e -> e.getElement() + "x" + e.getCount())
+                .collect(Collectors.joining(", "));
+            log.debug("Inventory snapshot set; rune summary: [{}]", rs);
         }
     }
 
-    @SuppressWarnings("unused")
-    protected LinkedList<PanelItemData> getRuneTracker()
+    // Enum names map 1:1 with runeIDs order for UI label purposes
+    private enum Runes
     {
-        return runeTracker;
+        AIR,
+        MIND,
+        WATER,
+        EARTH,
+        FIRE,
+        BODY,
+        COSMIC,
+        CHAOS,
+        ASTRAL,
+        NATURE,
+        LAW,
+        DEATH,
+        BLOOD,
+        SOUL,
+        WRATH,
+        MIST,
+        DUST,
+        MUD,
+        SMOKE,
+        STEAM,
+        LAVA
     }
-
-    enum Runes
-    {AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH, MIST, DUST, MUD, SMOKE, STEAM, LAVA}
 }

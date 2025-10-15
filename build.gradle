@@ -19,9 +19,8 @@ dependencies {
 	compileOnly 'org.projectlombok:lombok:1.18.24'
 	annotationProcessor 'org.projectlombok:lombok:1.18.24'
 
-	// Tests: JUnit and a lightweight SLF4J binding at test runtime so tests and test-run configs have a logger
+	// Tests: JUnit
 	testImplementation 'junit:junit:4.13.2'
-	testRuntimeOnly 'org.slf4j:slf4j-simple:1.7.36'
 
 	// Provide RuneLite client for test compilation and runtime so test code can reference and load client classes
 	testCompileOnly "net.runelite:client:${runeLiteVersion}"
