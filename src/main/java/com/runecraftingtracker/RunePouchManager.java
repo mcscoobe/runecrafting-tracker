@@ -72,7 +72,7 @@ public final class RunePouchManager
     private static final Map<Integer, String> ITEM_NAME_LOOKUP;
     static {
         Map<Integer, String> m = new HashMap<>();
-        for (int i = 0; i < RUNE_INDEX_TO_ITEM_ID.length; i++)
+        for (int i = 0; i < RUNE_INDEX_TO_ITEM_ID.length && i < RUNE_NAMES.length; i++)
         {
             m.put(RUNE_INDEX_TO_ITEM_ID[i], RUNE_NAMES[i]);
         }
