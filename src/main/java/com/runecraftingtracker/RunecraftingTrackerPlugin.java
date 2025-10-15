@@ -181,9 +181,16 @@ public class RunecraftingTrackerPlugin extends Plugin
     // Keep rune pouch contents up to date when varbits change
     @SuppressWarnings("unused")
     @Subscribe
-    public void onVarBitChanged(VarbitChanged event)
+    public void onVarbitChanged(VarbitChanged event)
     {
         if (runePouchManager == null || client == null)
+        {
+            return;
+        }
+
+        // Early-return: only handle rune pouch-related varbits
+        final int changedVarBitId = event.getVarbitId();
+        if (changedVarBitId != -1 && !runePouchManager.isRunePouchVarBit(changedVarBitId))
         {
             return;
         }
