@@ -177,9 +177,11 @@ public class RunecraftingTrackerPlugin extends Plugin
             log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
         }
     }
+
     // Keep rune pouch contents up to date when varbits change
+    @SuppressWarnings("unused")
     @Subscribe
-    public void onVarbitChanged(VarbitChanged event)
+    public void onVarBitChanged(VarbitChanged event)
     {
         if (runePouchManager == null || client == null)
         {
