@@ -82,11 +82,6 @@ public class RunecraftingTrackerPlugin extends Plugin
     @SuppressWarnings("unused")
     private ItemManager manager;
 
-    // Injected manager for rune pouch logic
-    @Inject
-    @SuppressWarnings("unused")
-    private RunePouchManager runePouchManager;
-
     // Cache of last known rune pouch contents (itemId -> qty) to avoid noisy logs/refreshes
     private final Map<Integer, Integer> lastRunePouch = new HashMap<>();
 
@@ -177,43 +172,7 @@ public class RunecraftingTrackerPlugin extends Plugin
             log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
         }
     }
-    // Keep rune pouch contents up to date when varbits change
-    @Subscribe
-    public void onVarBitChanged(VarbitChanged event)
-    {
-        if (runePouchManager == null || client == null)
-        {
-            return;
-        }
 
-        if (runePouchManager.hasNoRunePouch())
-        {
-            if (!lastRunePouch.isEmpty())
-            {
-                lastRunePouch.clear();
-                log.debug("Rune pouch not present; cleared cached contents");
-            }
-            return;
-        }
-
-        Map<Integer, Integer> current = runePouchManager.readContents();
-        if (!current.equals(lastRunePouch))
-        {
-            if (log.isDebugEnabled())
-            {
-                String contents = current.entrySet().stream()
-                    .map(e -> e.getKey() + "x" + e.getValue())
-                    .collect(Collectors.joining(", "));
-                log.debug("Rune pouch contents updated: [{}]", contents);
-                // Also log a human-readable summary
-                log.debug("Rune pouch (readable): {}", runePouchManager.toReadableString());
-            }
-            lastRunePouch.clear();
-            lastRunePouch.putAll(current);
-
-            // Optionally, refresh UI or trigger any dependent logic here if needed
-        }
-    }
 
     @SuppressWarnings("unused")
     @Subscribe
