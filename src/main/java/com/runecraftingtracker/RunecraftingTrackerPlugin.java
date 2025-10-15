@@ -179,7 +179,7 @@ public class RunecraftingTrackerPlugin extends Plugin
     }
     // Keep rune pouch contents up to date when varbits change
     @Subscribe
-    public void onVarbitChanged(VarbitChanged event)
+    public void onVarBitChanged(VarbitChanged event)
     {
         if (runePouchManager == null || client == null)
         {
