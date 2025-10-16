@@ -107,9 +107,6 @@ public class RunecraftingTrackerPlugin extends Plugin
     @SuppressWarnings("unused")
     private ItemManager manager;
 
-    // Injected manager for rune pouch logic
-    @Inject
-    @SuppressWarnings("unused")
     private RunePouchManager runePouchManager;
 
     // Cache of last known rune pouch contents (itemId -> qty) to avoid noisy logs/refreshes
@@ -135,7 +132,10 @@ public class RunecraftingTrackerPlugin extends Plugin
         clientToolbar.addNavigation(uiNavigationButton);
         log.debug("Navigation button added to client toolbar");
 
-        // Prime initial snapshots and pouch baseline on the client thread
+        runePouchManager = new RunePouchManager(client);
+        log.debug("Initialized RunePouchManager");
+
+        // Prime an initial snapshot so the first ItemContainerChanged can be diffed
         clientThread.invokeLater(() -> {
             takeInventorySnapshot();
             if (runePouchManager != null && !runePouchManager.hasNoRunePouch())
@@ -154,8 +154,7 @@ public class RunecraftingTrackerPlugin extends Plugin
     {
         clientToolbar.removeNavigation(uiNavigationButton);
         lastRunePouch.clear();
-        panelById.clear();
-        pouchBaselineReady = false;
+        runePouchManager = null;
     }
 
     private void init()
@@ -227,118 +226,48 @@ public class RunecraftingTrackerPlugin extends Plugin
         updateRunePouchDeltas("stat");
     }
 
-    // Centralized method to compute and apply pouch deltas
-    private void updateRunePouchDeltas(String source)
+    // Keep rune pouch contents up to date when varbits change
+    @SuppressWarnings("unused")
+    @Subscribe
+    public void onVarbitChanged(VarbitChanged event)
     {
-        if (runePouchManager == null || client == null)
+        if (event == null || runePouchManager == null || client == null)
         {
             return;
         }
+
+        final int changedVarBitId = event.getVarbitId();
+        if (changedVarBitId != -1 && !runePouchManager.isRunePouchVarBit(changedVarBitId))
+        {
+            return;
+        }
+
         if (runePouchManager.hasNoRunePouch())
         {
-            if (!lastRunePouch.isEmpty() || pouchBaselineReady)
+            if (!lastRunePouch.isEmpty())
             {
                 lastRunePouch.clear();
-                pouchBaselineReady = false;
-                log.debug("Rune pouch not present; cleared cached contents ({} trigger)", source);
+                log.debug("Rune pouch not present; cleared cached contents");
             }
             return;
         }
 
         Map<Integer, Integer> current = runePouchManager.readContents();
-        if (!pouchBaselineReady)
+        if (!current.equals(lastRunePouch))
         {
-            lastRunePouch.clear();
-            lastRunePouch.putAll(current);
-            pouchBaselineReady = true;
             if (log.isDebugEnabled())
             {
-                String currStr = current.entrySet().stream()
-                    .map(e -> e.getKey() + "x" + e.getValue())
-                    .collect(Collectors.joining(", "));
-                log.debug("Pouch baseline initialized ({}): curr=[{}]", source, currStr);
+                String contents = current.entrySet().stream()
+                        .map(e -> e.getKey() + "x" + e.getValue())
+                        .collect(Collectors.joining(", "));
+                log.debug("Rune pouch contents updated: [{}]", contents);
+                log.debug("Rune pouch (readable): {}", runePouchManager.toReadableString());
             }
-            return; // do not count existing contents as crafted
+            lastRunePouch.clear();
+            lastRunePouch.putAll(current);
         }
-
-        if (log.isDebugEnabled())
-        {
-            String prevStr = lastRunePouch.entrySet().stream()
-                .map(e -> e.getKey() + "x" + e.getValue())
-                .collect(Collectors.joining(", "));
-            String currStr = current.entrySet().stream()
-                .map(e -> e.getKey() + "x" + e.getValue())
-                .collect(Collectors.joining(", "));
-            log.debug("Pouch ({}): prev=[{}] curr=[{}]", source, prevStr, currStr);
-        }
-        if (current.equals(lastRunePouch))
-        {
-            return; // no change
-        }
-
-        // Compute positive deltas only
-        Map<Integer, Integer> deltas = new HashMap<>();
-        for (Map.Entry<Integer, Integer> e : current.entrySet())
-        {
-            int id = e.getKey();
-            int now = e.getValue() == null ? 0 : e.getValue();
-            int before = lastRunePouch.getOrDefault(id, 0);
-            int diff = now - before;
-            if (diff > 0 && runeIdSet.contains(id))
-            {
-                deltas.put(id, diff);
-            }
-        }
-        if (log.isDebugEnabled())
-        {
-            String dstr = deltas.entrySet().stream()
-                .map(e -> e.getKey() + "+" + e.getValue())
-                .collect(Collectors.joining(", "));
-            log.debug("Pouch ({}): positive deltas [{}]", source, dstr);
-        }
-
-        if (!deltas.isEmpty())
-        {
-            boolean updated = false;
-            for (Map.Entry<Integer, Integer> de : deltas.entrySet())
-            {
-                updated |= applyDeltaToPanel(de.getKey(), de.getValue(), source);
-            }
-            if (updated)
-            {
-                try
-                {
-                    SwingUtilities.invokeAndWait(() -> uiPanel.pack());
-                }
-                catch (InterruptedException | InvocationTargetException e)
-                {
-                    log.warn("Failed to pack UI synchronously ({} pouch)", source, e);
-                    SwingUtilities.invokeLater(uiPanel::pack);
-                }
-                uiPanel.refresh();
-            }
-        }
-
-        lastRunePouch.clear();
-        lastRunePouch.putAll(current);
     }
 
-    @SuppressWarnings("unused")
-    @Subscribe
-    public void onVarbitChanged(VarbitChanged event)
-    {
-        log.debug("VarbitChanged received; checking pouch deltas");
-        // Read pouch on any varbit change; internal map comparison prevents needless work
-        updateRunePouchDeltas("varbit");
-    }
-
-    @SuppressWarnings("unused")
-    @Subscribe
-    public void onGameTick(GameTick tick)
-    {
-        // Fallback to catch pouch changes even if varbit events are missed
-        updateRunePouchDeltas("tick");
-    }
 
     @SuppressWarnings("unused")
     @Subscribe
