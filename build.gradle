@@ -3,7 +3,6 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
 	mavenCentral()
 	maven {
 		url = 'https://repo.runelite.net'
@@ -15,8 +14,6 @@ def runeLiteVersion = '1.11.20.1'
 dependencies {
 	// RuneLite client is provided at runtime by the client/runtime environment, so keep it compileOnly for plugin development
 	compileOnly "net.runelite:client:${runeLiteVersion}"
-
-	implementation 'com.runecraftingtracker:rune-pouch-manager:1.0.0'
 
 	// Lombok for compile-time only
 	compileOnly 'org.projectlombok:lombok:1.18.24'

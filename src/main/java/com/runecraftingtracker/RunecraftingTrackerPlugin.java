@@ -82,8 +82,6 @@ public class RunecraftingTrackerPlugin extends Plugin
     @SuppressWarnings("unused")
     private ItemManager manager;
 
-    private RunePouchManager runePouchManager;
-
     // Cache of last known rune pouch contents (itemId -> qty) to avoid noisy logs/refreshes
     private final Map<Integer, Integer> lastRunePouch = new HashMap<>();
 
@@ -106,9 +104,6 @@ public class RunecraftingTrackerPlugin extends Plugin
         clientToolbar.addNavigation(uiNavigationButton);
         log.debug("Navigation button added to client toolbar");
 
-        runePouchManager = new RunePouchManager(client);
-        log.debug("Initialized RunePouchManager");
-
         // Prime an initial snapshot so the first ItemContainerChanged can be diffed
         clientThread.invokeLater(() -> {
             takeInventorySnapshot();
@@ -121,7 +116,6 @@ public class RunecraftingTrackerPlugin extends Plugin
     {
         clientToolbar.removeNavigation(uiNavigationButton);
         lastRunePouch.clear();
-        runePouchManager = null;
     }
 
     private void init()
@@ -176,48 +170,6 @@ public class RunecraftingTrackerPlugin extends Plugin
         else
         {
             log.debug("Runecraft stat changed; baseline exists; not taking snapshot to preserve pre-craft state");
-        }
-    }
-
-    // Keep rune pouch contents up to date when varbits change
-    @SuppressWarnings("unused")
-    @Subscribe
-    public void onVarbitChanged(VarbitChanged event)
-    {
-        if (event == null || runePouchManager == null || client == null)
-        {
-            return;
-        }
-
-        final int changedVarBitId = event.getVarbitId();
-        if (changedVarBitId != -1 && !runePouchManager.isRunePouchVarBit(changedVarBitId))
-        {
-            return;
-        }
-
-        if (runePouchManager.hasNoRunePouch())
-        {
-            if (!lastRunePouch.isEmpty())
-            {
-                lastRunePouch.clear();
-                log.debug("Rune pouch not present; cleared cached contents");
-            }
-            return;
-        }
-
-        Map<Integer, Integer> current = runePouchManager.readContents();
-        if (!current.equals(lastRunePouch))
-        {
-            if (log.isDebugEnabled())
-            {
-                String contents = current.entrySet().stream()
-                        .map(e -> e.getKey() + "x" + e.getValue())
-                        .collect(Collectors.joining(", "));
-                log.debug("Rune pouch contents updated: [{}]", contents);
-                log.debug("Rune pouch (readable): {}", runePouchManager.toReadableString());
-            }
-            lastRunePouch.clear();
-            lastRunePouch.putAll(current);
         }
     }
 
