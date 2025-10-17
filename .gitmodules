@@ -1,0 +1,3 @@
+[submodule "rune-pouch-manager"]
+	path = rune-pouch-manager
+	url = https://github.com/mcscoobe/rune-pouch-manager.git
