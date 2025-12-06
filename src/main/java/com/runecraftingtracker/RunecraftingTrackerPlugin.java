@@ -38,14 +38,11 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Client;
-import net.runelite.api.GameState;
+import net.runelite.api.*;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
-import net.runelite.api.Skill;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -81,6 +78,9 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 	@Inject
 	private ItemManager itemManager;
+
+	@Inject
+	private WorldView worldView;
 
 	@Override
 	protected void startUp() throws Exception
@@ -141,7 +141,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 			return;
 		}
 
-		if (!isInRunecraftingRegion())
+		if (isNotInRunecraftingRegion())
 		{
 			return;
 		}
@@ -157,7 +157,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (!isInRunecraftingRegion())
+		if (isNotInRunecraftingRegion())
 		{
 			return;
 		}
@@ -177,16 +177,21 @@ public class RunecraftingTrackerPlugin extends Plugin
 			// Create inventory multiset {id -> quantity}
 			Multiset<Integer> currentInventory = createInventorySnapshot(current);
 
-			// Get inventory diff with snapshot
-			final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
+			// Calculate difference manually to avoid @Beta API
+			Multiset<Integer> diff = HashMultiset.create();
+			for (Integer itemId : currentInventory.elementSet())
+			{
+				int currentCount = currentInventory.count(itemId);
+				int snapshotCount = inventorySnapshot.count(itemId);
+				int difference = currentCount - snapshotCount;
+				if (difference > 0)
+				{
+					diff.add(itemId, difference);
+				}
+			}
 
-			// Process diff entries directly without ItemStack
-			List<Multiset.Entry<Integer>> items = diff.entrySet().stream()
-				.filter(e -> e.getCount() > 0)
-				.collect(Collectors.toList());
-
-			if (!items.isEmpty()) {
-				for (Multiset.Entry<Integer> entry : items)
+			if (!diff.isEmpty()) {
+				for (Multiset.Entry<Integer> entry : diff.entrySet())
 				{
 					PanelItemData runeData = runeTrackerMap.get(entry.getElement());
 					if (runeData != null)
@@ -225,29 +230,28 @@ public class RunecraftingTrackerPlugin extends Plugin
 		return snapshot;
 	}
 
-	private boolean isInRunecraftingRegion()
+	private boolean isNotInRunecraftingRegion()
 	{
 		if (client.getLocalPlayer() == null)
 		{
-			return false;
+			return true;
 		}
 
-		// TODO: replace deprecated method use
-		int[] regions = client.getMapRegions();
+		int[] regions = worldView.getMapRegions();
 		if (regions == null)
 		{
-			return false;
+			return true;
 		}
 
 		for (int region : regions)
 		{
 			if (RunecraftingRegions.REGIONS.contains(region))
 			{
-				return true;
+				return false;
 			}
 		}
 
-		return false;
+		return true;
 	}
 
 	protected LinkedList<PanelItemData> getRuneTracker()
