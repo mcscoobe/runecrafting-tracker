@@ -27,33 +27,29 @@ package com.runecraftingtracker;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
-import com.google.common.collect.ImmutableSet;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.Skill;
-import net.runelite.api.gameval.ItemID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.ItemStack;
+
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -68,40 +64,10 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
-
-	// Whitelist of region IDs where runecrafting occurs (from actual game data)
-	private static final Set<Integer> RUNECRAFTING_REGIONS = ImmutableSet.of(
-		// Air Altar
-		11082, 11083, 11084, 11338, 11339, 11340, 11594, 11595, 11596,
-		// Water Altar
-		10570, 10571, 10572, 10826, 10827, 10828,
-		// Earth Altar
-		10314, 10315, 10316,
-		// Fire Altar
-		10059, 10060,
-		// Body Altar
-		9802, 9803, 9804, 10058,
-		// Cosmic Altar
-		8266, 8267, 8268, 8522, 8523, 8524, 8778, 8779, 8780,
-		// Chaos Altar
-		9034, 9035, 9036, 9290, 9291, 9292,
-		// Astral Altar
-		8251, 8252, 8253, 8507, 8508, 8509,
-		// Nature Altar
-		9546, 9547, 9548,
-		// Law Altar (shares regions with Body/Nature)
-		// Death Altar
-		6715,
-		// Blood Altar (Zeah)
-		12618, 12619, 12620, 12874, 12875, 12876, 13130, 13131, 13132,
-		// Ourania altar
-		12119
-	);
-
 	private RunecraftingTrackerPanel uiPanel;
 	private NavigationButton uiNavigationButton;
-	private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
-	private Map<Integer, PanelItemData> runeTrackerMap = new HashMap<>();
+	private final LinkedList<PanelItemData> runeTracker = new LinkedList<>();
+	private final Map<Integer, PanelItemData> runeTrackerMap = new HashMap<>();
 	private Multiset<Integer> inventorySnapshot;
 
 	@Inject
@@ -119,7 +85,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
-		final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
+		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
 		uiPanel = new RunecraftingTrackerPanel(itemManager, runeTracker);
 
 		uiNavigationButton = NavigationButton.builder()
@@ -161,7 +127,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 	{
 		if (event.getGameState() == GameState.LOGGING_IN)
 		{
-			if (runeTracker.size() == 0) {
+			if (runeTracker.isEmpty()) {
 				clientThread.invokeLater(this::init);
 			}
 		}
@@ -196,7 +162,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 			return;
 		}
 
-		if (event.getContainerId() != InventoryID.INVENTORY.getId())
+		if (event.getContainerId() != InventoryID.INV)
 		{
 			return;
 		}
@@ -214,22 +180,22 @@ public class RunecraftingTrackerPlugin extends Plugin
 			// Get inventory diff with snapshot
 			final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
 
-			// Convert multiset diff to ItemStack list
-			List<ItemStack> items = diff.entrySet().stream()
-				.map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
+			// Process diff entries directly without ItemStack
+			List<Multiset.Entry<Integer>> items = diff.entrySet().stream()
+				.filter(e -> e.getCount() > 0)
 				.collect(Collectors.toList());
 
-			if (items.size() > 0) {
-				for (ItemStack stack : items)
+			if (!items.isEmpty()) {
+				for (Multiset.Entry<Integer> entry : items)
 				{
-					PanelItemData runeData = runeTrackerMap.get(stack.getId());
+					PanelItemData runeData = runeTrackerMap.get(entry.getElement());
 					if (runeData != null)
 					{
 						if (!runeData.isVisible())
 						{
 							runeData.setVisible(true);
 						}
-						runeData.setCrafted(runeData.getCrafted() + stack.getQuantity());
+						runeData.setCrafted(runeData.getCrafted() + entry.getCount());
 					}
 				}
 				inventorySnapshot = currentInventory;
@@ -244,7 +210,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 	private void takeInventorySnapshot()
 	{
-		final ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
+		final ItemContainer itemContainer = client.getItemContainer(InventoryID.INV);
 		if (itemContainer != null)
 		{
 			inventorySnapshot = createInventorySnapshot(itemContainer);
@@ -266,6 +232,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 			return false;
 		}
 
+		// TODO: replace deprecated method use
 		int[] regions = client.getMapRegions();
 		if (regions == null)
 		{
@@ -274,7 +241,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 		for (int region : regions)
 		{
-			if (RUNECRAFTING_REGIONS.contains(region))
+			if (RunecraftingRegions.REGIONS.contains(region))
 			{
 				return true;
 			}
@@ -287,39 +254,4 @@ public class RunecraftingTrackerPlugin extends Plugin
 	{
 		return runeTracker;
 	}
-
-	@Getter
-    enum Runes
-	{
-		AIR(ItemID.AIRRUNE),
-		MIND(ItemID.MINDRUNE),
-		WATER(ItemID.WATERRUNE),
-		EARTH(ItemID.EARTHRUNE),
-		FIRE(ItemID.FIRERUNE),
-		BODY(ItemID.BODYRUNE),
-		COSMIC(ItemID.COSMICRUNE),
-		CHAOS(ItemID.CHAOSRUNE),
-		ASTRAL(ItemID.ASTRALRUNE),
-		NATURE(ItemID.NATURERUNE),
-		LAW(ItemID.LAWRUNE),
-		DEATH(ItemID.DEATHRUNE),
-		BLOOD(ItemID.BLOODRUNE),
-		SOUL(ItemID.SOULRUNE),
-		WRATH(ItemID.WRATHRUNE),
-		MIST(ItemID.MISTRUNE),
-		DUST(ItemID.DUSTRUNE),
-		MUD(ItemID.MUDRUNE),
-		SMOKE(ItemID.SMOKERUNE),
-		STEAM(ItemID.STEAMRUNE),
-		LAVA(ItemID.LAVARUNE),
-		AETHER(ItemID.AETHERRUNE);
-
-		private final int itemId;
-
-		Runes(int itemId)
-		{
-			this.itemId = itemId;
-		}
-
-    }
 }
