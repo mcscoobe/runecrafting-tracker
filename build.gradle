@@ -10,19 +10,21 @@ repositories {
 	mavenCentral()
 }
 
-def runeLiteVersion = '1.9.1'
+def runeLiteVersion = 'latest.release'
 
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
 
-	compileOnly 'org.projectlombok:lombok:1.18.4'
-	annotationProcessor 'org.projectlombok:lombok:1.18.4'
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+	testCompileOnly 'org.projectlombok:lombok:1.18.30'
+	testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 
 	testImplementation 'junit:junit:4.12'
-	testImplementation 'org.slf4j:slf4j-simple:1.7.12'
-	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion, {
-		exclude group: 'ch.qos.logback', module: 'logback-classic'
-	}
+	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion
+	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
+	testImplementation 'ch.qos.logback:logback-classic:1.2.9'
 }
 
 group = 'com.runecraftingtracker'
@@ -31,4 +33,17 @@ sourceCompatibility = '1.8'
 
 tasks.withType(JavaCompile) {
 	options.encoding = 'UTF-8'
+}
+
+task runTestClient(type: JavaExec) {
+	group = 'application'
+	description = 'Runs the RunecraftingTrackerPluginTest main class'
+	dependsOn testClasses
+	classpath = sourceSets.test.runtimeClasspath
+	main = 'com.runecraftingtracker.RunecraftingTrackerPluginTest'
+	args = ['--developer-mode']
+	jvmArgs = [
+		'-ea',
+		'-Drunelite.pluginhub.skip=true'
+	]
 }

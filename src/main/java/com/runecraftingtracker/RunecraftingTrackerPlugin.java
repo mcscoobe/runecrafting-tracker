@@ -28,10 +28,11 @@ import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
 import java.awt.image.BufferedImage;
-import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -64,11 +65,9 @@ public class RunecraftingTrackerPlugin extends Plugin
 	private static final int RUNECRAFTING_ANIMATION_ID = 791;
 
 	private RunecraftingTrackerPanel uiPanel;
-
-	private int[] runeIDs = {556, 558, 555, 557, 554, 559, 564, 562, 9075, 561, 563, 560, 565, 566, 21880, 4695, 4696, 4698, 4697, 4694, 4699};
-
 	private NavigationButton uiNavigationButton;
 	private LinkedList<PanelItemData> runeTracker = new LinkedList<>();
+	private Map<Integer, PanelItemData> runeTrackerMap = new HashMap<>();
 	private Multiset<Integer> inventorySnapshot;
 
 	@Inject
@@ -81,13 +80,13 @@ public class RunecraftingTrackerPlugin extends Plugin
 	private ClientThread clientThread;
 
 	@Inject
-	private ItemManager manager;
+	private ItemManager itemManager;
 
 	@Override
 	protected void startUp() throws Exception
 	{
 		final BufferedImage icon = ImageUtil.getResourceStreamFromClass(getClass(), "icon.png");
-		uiPanel = new RunecraftingTrackerPanel(manager, runeTracker);
+		uiPanel = new RunecraftingTrackerPanel(itemManager, runeTracker);
 
 		uiNavigationButton = NavigationButton.builder()
 			.tooltip("Runecrafting Tracker")
@@ -107,14 +106,16 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 	private void init()
 	{
-		for (int i = 0; i < Runes.values().length; i++)
+		for (Runes rune : Runes.values())
 		{
-			runeTracker.add(new PanelItemData(
-				Runes.values()[i].name(),
-				runeIDs[i],
+			PanelItemData data = new PanelItemData(
+				rune.name(),
+				rune.getItemId(),
 				false,
 				0,
-				manager.getItemPrice(runeIDs[i])));
+				itemManager.getItemPrice(rune.getItemId()));
+			runeTracker.add(data);
+			runeTrackerMap.put(rune.getItemId(), data);
 		}
 	}
 
@@ -132,25 +133,19 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
-		if (client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null)
+		if (event.getActor() == null || event.getActor() != client.getLocalPlayer())
 		{
 			return;
 		}
 
-		String playerName = client.getLocalPlayer().getName();
-		String actorName = event.getActor().getName();
-
-		if (playerName.equals(actorName))
+		int animId = event.getActor().getAnimation();
+		if (animId == RUNECRAFTING_ANIMATION_ID)
 		{
-			int animId = event.getActor().getAnimation();
-			if (animId == RUNECRAFTING_ANIMATION_ID)
-			{
-				takeInventorySnapshot();
-			}
-			else
-			{
-				inventorySnapshot = null;
-			}
+			takeInventorySnapshot();
+		}
+		else
+		{
+			inventorySnapshot = null;
 		}
 	}
 
@@ -170,9 +165,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 		if (inventorySnapshot != null)
 		{
 			// Create inventory multiset {id -> quantity}
-			Multiset<Integer> currentInventory = HashMultiset.create();
-			Arrays.stream(current.getItems())
-				.forEach(item -> currentInventory.add(item.getId(), item.getQuantity()));
+			Multiset<Integer> currentInventory = createInventorySnapshot(current);
 
 			// Get inventory diff with snapshot
 			final Multiset<Integer> diff = Multisets.difference(currentInventory, inventorySnapshot);
@@ -182,34 +175,25 @@ public class RunecraftingTrackerPlugin extends Plugin
 				.map(e -> new ItemStack(e.getElement(), e.getCount(), client.getLocalPlayer().getLocalLocation()))
 				.collect(Collectors.toList());
 
-			LinkedList<PanelItemData> panels = uiPanel.getRuneTracker();
-
 			if (items.size() > 0) {
 				for (ItemStack stack : items)
 				{
-					for (PanelItemData item : panels)
+					PanelItemData runeData = runeTrackerMap.get(stack.getId());
+					if (runeData != null)
 					{
-						if (item.getId() == stack.getId())
+						if (!runeData.isVisible())
 						{
-							if (!item.isVisible()) {
-								item.setVisible(true);
-							}
-							item.setCrafted(item.getCrafted() + stack.getQuantity());
+							runeData.setVisible(true);
 						}
+						runeData.setCrafted(runeData.getCrafted() + stack.getQuantity());
 					}
 				}
 				inventorySnapshot = currentInventory;
 
-				try
-				{
-					SwingUtilities.invokeAndWait(uiPanel::pack);
-				}
-				catch (InterruptedException | InvocationTargetException e)
-				{
-					e.printStackTrace();
-				}
-
-				uiPanel.refresh();
+				SwingUtilities.invokeLater(() -> {
+					uiPanel.pack();
+					uiPanel.refresh();
+				});
 			}
 		}
 	}
@@ -219,10 +203,16 @@ public class RunecraftingTrackerPlugin extends Plugin
 		final ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
 		if (itemContainer != null)
 		{
-			inventorySnapshot = HashMultiset.create();
-			Arrays.stream(itemContainer.getItems())
-				.forEach(item -> inventorySnapshot.add(item.getId(), item.getQuantity()));
+			inventorySnapshot = createInventorySnapshot(itemContainer);
 		}
+	}
+
+	private Multiset<Integer> createInventorySnapshot(ItemContainer container)
+	{
+		Multiset<Integer> snapshot = HashMultiset.create();
+		Arrays.stream(container.getItems())
+			.forEach(item -> snapshot.add(item.getId(), item.getQuantity()));
+		return snapshot;
 	}
 
 	protected LinkedList<PanelItemData> getRuneTracker()
@@ -231,5 +221,40 @@ public class RunecraftingTrackerPlugin extends Plugin
 	}
 
 	enum Runes
-	{AIR, MIND, WATER, EARTH, FIRE, BODY, COSMIC, CHAOS, ASTRAL, NATURE, LAW, DEATH, BLOOD, SOUL, WRATH, MIST, DUST, MUD, SMOKE, STEAM, LAVA}
+	{
+		AIR(556),
+		MIND(558),
+		WATER(555),
+		EARTH(557),
+		FIRE(554),
+		BODY(559),
+		COSMIC(564),
+		CHAOS(562),
+		ASTRAL(9075),
+		NATURE(561),
+		LAW(563),
+		DEATH(560),
+		BLOOD(565),
+		SOUL(566),
+		WRATH(21880),
+		MIST(4695),
+		DUST(4696),
+		MUD(4698),
+		SMOKE(4697),
+		STEAM(4694),
+		LAVA(4699),
+		AETHER(30887);
+
+		private final int itemId;
+
+		Runes(int itemId)
+		{
+			this.itemId = itemId;
+		}
+
+		public int getItemId()
+		{
+			return itemId;
+		}
+	}
 }

@@ -28,7 +28,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.GridLayout;
 import java.util.LinkedList;
-import java.util.concurrent.atomic.AtomicInteger;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
@@ -43,6 +43,17 @@ import net.runelite.client.util.QuantityFormatter;
 
 public class RunecraftingTrackerPanel extends PluginPanel
 {
+	private static final int PANEL_BORDER_TOP = 10;
+	private static final int PANEL_BORDER_SIDES = 5;
+	private static final int ITEM_BORDER_VERTICAL = 4;
+	private static final int ITEM_BORDER_HORIZONTAL = 10;
+	private static final int TEXT_BORDER = 5;
+	private static final int TOP_PANEL_BORDER = 5;
+	private static final int GRID_SPACING = 2;
+
+	private static final String HTML_LABEL_TEMPLATE =
+			"<html><body style='color:%s'>%s<span style='color:white'>%s</span></body></html>";
+
 	// When there is nothing tracked, display this
 	private final PluginErrorPanel errorPanel = new PluginErrorPanel();
 	private final JPanel layoutContainer;
@@ -52,9 +63,6 @@ public class RunecraftingTrackerPanel extends PluginPanel
 	private final ImageIcon COIN_ICON =
 			new ImageIcon(ImageUtil.getResourceStreamFromClass(RunecraftingTrackerPlugin.class,"COIN.png"));
 
-	private static final String HTML_LABEL_TEMPLATE =
-			"<html><body style='color:%s'>%s<span style='color:white'>%s</span></body></html>";
-
 
 	RunecraftingTrackerPanel(ItemManager itemManager, LinkedList<PanelItemData> runeTracker)
 	{
@@ -62,12 +70,12 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		this.itemManager = itemManager;
 		this.runeTracker = runeTracker;
 
-		setBorder(new EmptyBorder(10, 5, 5, 5));
+		setBorder(new EmptyBorder(PANEL_BORDER_TOP, PANEL_BORDER_SIDES, PANEL_BORDER_SIDES, PANEL_BORDER_SIDES));
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 		setLayout(new BorderLayout());
 
 		layoutContainer = new JPanel();
-		layoutContainer.setLayout(new GridLayout(0, 1, 0, 2));
+		layoutContainer.setLayout(new GridLayout(0, 1, 0, GRID_SPACING));
 
 		add(layoutContainer, BorderLayout.NORTH);
 
@@ -81,11 +89,9 @@ public class RunecraftingTrackerPanel extends PluginPanel
 	{
 		layoutContainer.removeAll();
 
-		AtomicInteger totalProfit = new AtomicInteger(0);
-
-		runeTracker.forEach((temp) -> {
-			totalProfit.addAndGet(temp.getCrafted() * temp.getCostPerRune());
-		});
+		long totalProfit = runeTracker.stream()
+			.mapToLong(runeData -> (long) runeData.getCrafted() * runeData.getCostPerRune())
+			.sum();
 
 		if (runeTracker.size() == 0)
 		{
@@ -93,13 +99,13 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		} else {
 			layoutContainer.add(topPanelItem(COIN_ICON, totalProfit));
 
-			runeTracker.forEach((temp) -> {
-				if (temp.isVisible())
+			runeTracker.forEach((runeData) -> {
+				if (runeData.isVisible())
 				{
 					JPanel runePanelItem = runePanelItem(
-							temp.getId(),
-							temp.getCrafted(),
-							temp.getCrafted() * temp.getCostPerRune());
+							runeData.getId(),
+							runeData.getCrafted(),
+							(long) runeData.getCrafted() * runeData.getCostPerRune());
 					layoutContainer.add(runePanelItem);
 				}
 			});
@@ -128,27 +134,27 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		return String.format(HTML_LABEL_TEMPLATE, ColorUtil.toHexColor(ColorScheme.LIGHT_GRAY_COLOR), label, valueStr + valueSuffix);
 	}
 
-	private JPanel runePanelItem(int itemId, int textTop_crafted, int textBottom_profit)
+	private JPanel runePanelItem(int itemId, int craftedCount, long profitAmount)
 	{
 		JPanel container = new JPanel();
 		container.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		container.setLayout(new BorderLayout());
-		container.setBorder(new EmptyBorder(4, 10, 4, 10));
+		container.setBorder(new EmptyBorder(ITEM_BORDER_VERTICAL, ITEM_BORDER_HORIZONTAL, ITEM_BORDER_VERTICAL, ITEM_BORDER_HORIZONTAL));
 
 		JLabel iconLabel = new JLabel();
-		itemManager.getImage(itemId, textTop_crafted, true).addTo(iconLabel);
+		itemManager.getImage(itemId, craftedCount, true).addTo(iconLabel);
 		container.add(iconLabel, BorderLayout.WEST);
 
 		JPanel textContainer = new JPanel();
 		textContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		textContainer.setLayout(new GridLayout(2, 1));
-		textContainer.setBorder(new EmptyBorder(5, 5, 5, 10));
+		textContainer.setBorder(new EmptyBorder(TEXT_BORDER, TEXT_BORDER, TEXT_BORDER, ITEM_BORDER_HORIZONTAL));
 
-		JLabel topLine = new JLabel(createLabel("Crafted: ", textTop_crafted));
+		JLabel topLine = new JLabel(createLabel("Crafted: ", craftedCount));
 		topLine.setForeground(Color.WHITE);
 		topLine.setFont(FontManager.getRunescapeSmallFont());
 
-		JLabel bottomLine = new JLabel(createLabel("Profit: ", textBottom_profit, " gp"));
+		JLabel bottomLine = new JLabel(createLabel("Profit: ", profitAmount, " gp"));
 		bottomLine.setForeground(Color.WHITE);
 		bottomLine.setFont(FontManager.getRunescapeSmallFont());
 
@@ -160,24 +166,24 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		return container;
 	}
 
-	private JPanel topPanelItem(ImageIcon icon, AtomicInteger totalProfit)
+	private JPanel topPanelItem(ImageIcon icon, long totalProfit)
 	{
 		JPanel panelContainer = new JPanel();
 		panelContainer.setBackground(ColorScheme.SCROLL_TRACK_COLOR);
 		panelContainer.setLayout(new BorderLayout());
-		panelContainer.setBorder(new EmptyBorder(5, 10, 5, 10));
+		panelContainer.setBorder(new EmptyBorder(TOP_PANEL_BORDER, ITEM_BORDER_HORIZONTAL, TOP_PANEL_BORDER, ITEM_BORDER_HORIZONTAL));
 
 		JLabel iconLabel = new JLabel(icon);
 		panelContainer.add(iconLabel, BorderLayout.WEST);
 
-		JLabel middleLine = new JLabel(createLabel("Total profit: ", totalProfit.longValue(), " gp"));
+		JLabel middleLine = new JLabel(createLabel("Total profit: ", totalProfit, " gp"));
 		middleLine.setForeground(Color.WHITE);
 		middleLine.setFont(FontManager.getRunescapeSmallFont());
 
 		JPanel textContainer = new JPanel();
 		textContainer.setBackground(ColorScheme.SCROLL_TRACK_COLOR);
 		textContainer.setLayout(new GridLayout(1, 1));
-		textContainer.setBorder(new EmptyBorder(0, 10, 0, 10));
+		textContainer.setBorder(new EmptyBorder(0, ITEM_BORDER_HORIZONTAL, 0, ITEM_BORDER_HORIZONTAL));
 		textContainer.add(middleLine);
 
 		panelContainer.add(textContainer, BorderLayout.CENTER);
@@ -196,10 +202,10 @@ public class RunecraftingTrackerPanel extends PluginPanel
 			}
 
 
-			for (PanelItemData item : runeTracker)
+			for (PanelItemData runeData : runeTracker)
 			{
-				item.setCrafted(0);
-				item.setVisible(false);
+				runeData.setCrafted(0);
+				runeData.setVisible(false);
 			}
 
 			layoutContainer.removeAll();
@@ -208,7 +214,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		});
 
 		final JPopupMenu popupMenu = new JPopupMenu();
-		popupMenu.setBorder(new EmptyBorder(5, 5, 5, 5));
+		popupMenu.setBorder(new EmptyBorder(TOP_PANEL_BORDER, TOP_PANEL_BORDER, TOP_PANEL_BORDER, TOP_PANEL_BORDER));
 		popupMenu.add(resetAll);
 		panelContainer.setComponentPopupMenu(popupMenu);
 
