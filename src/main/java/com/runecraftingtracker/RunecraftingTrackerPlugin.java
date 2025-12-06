@@ -27,15 +27,19 @@ package com.runecraftingtracker;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
+import com.google.common.collect.ImmutableSet;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
+
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -44,6 +48,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -63,6 +68,39 @@ import net.runelite.client.util.ImageUtil;
 public class RunecraftingTrackerPlugin extends Plugin
 {
 	private static final int RUNECRAFTING_ANIMATION_ID = 791;
+
+	// Whitelist of region IDs where runecrafting occurs (from actual game data)
+	private static final Set<Integer> RUNECRAFTING_REGIONS = ImmutableSet.of(
+		// Air Altar
+		11082, 11083, 11084, 11338, 11339, 11340, 11594, 11595, 11596,
+		// Water Altar
+		10570, 10571, 10572, 10826, 10827, 10828,
+		// Earth Altar
+		10314, 10315, 10316,
+		// Fire Altar
+		10059, 10060,
+		// Body Altar
+		9802, 9803, 9804, 10058,
+		// Cosmic Altar
+		8266, 8267, 8268, 8522, 8523, 8524, 8778, 8779, 8780,
+		// Chaos Altar
+		9034, 9035, 9036, 9290, 9291, 9292,
+		// Astral Altar
+		8251, 8252, 8253, 8507, 8508, 8509,
+		// Nature Altar
+		9546, 9547, 9548,
+		// Law Altar (shares regions with Body/Nature)
+		// Death Altar
+		6715,
+		// Blood Altar (Zeah)
+		12618, 12619, 12620, 12874, 12875, 12876, 13130, 13131, 13132,
+		// Abyss
+		13107, 12107,
+		// Guardians of the Rift
+		15004, 14484, 14996, 15260,
+		// Ourania altar
+		12119
+	);
 
 	private RunecraftingTrackerPanel uiPanel;
 	private NavigationButton uiNavigationButton;
@@ -133,6 +171,11 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
+		if (!isInRunecraftingRegion())
+		{
+			return;
+		}
+
 		if (event.getActor() == null || event.getActor() != client.getLocalPlayer())
 		{
 			return;
@@ -152,6 +195,11 @@ public class RunecraftingTrackerPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
+		if (!isInRunecraftingRegion())
+		{
+			return;
+		}
+
 		if (event.getContainerId() != InventoryID.INVENTORY.getId())
 		{
 			return;
@@ -215,35 +263,60 @@ public class RunecraftingTrackerPlugin extends Plugin
 		return snapshot;
 	}
 
+	private boolean isInRunecraftingRegion()
+	{
+		if (client.getLocalPlayer() == null)
+		{
+			return false;
+		}
+
+		int[] regions = client.getMapRegions();
+		if (regions == null)
+		{
+			return false;
+		}
+
+		for (int region : regions)
+		{
+			if (RUNECRAFTING_REGIONS.contains(region))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	protected LinkedList<PanelItemData> getRuneTracker()
 	{
 		return runeTracker;
 	}
 
-	enum Runes
+	@Getter
+    enum Runes
 	{
-		AIR(556),
-		MIND(558),
-		WATER(555),
-		EARTH(557),
-		FIRE(554),
-		BODY(559),
-		COSMIC(564),
-		CHAOS(562),
-		ASTRAL(9075),
-		NATURE(561),
-		LAW(563),
-		DEATH(560),
-		BLOOD(565),
-		SOUL(566),
-		WRATH(21880),
-		MIST(4695),
-		DUST(4696),
-		MUD(4698),
-		SMOKE(4697),
-		STEAM(4694),
-		LAVA(4699),
-		AETHER(30887);
+		AIR(ItemID.AIRRUNE),
+		MIND(ItemID.MINDRUNE),
+		WATER(ItemID.WATERRUNE),
+		EARTH(ItemID.EARTHRUNE),
+		FIRE(ItemID.FIRERUNE),
+		BODY(ItemID.BODYRUNE),
+		COSMIC(ItemID.COSMICRUNE),
+		CHAOS(ItemID.CHAOSRUNE),
+		ASTRAL(ItemID.ASTRALRUNE),
+		NATURE(ItemID.NATURERUNE),
+		LAW(ItemID.LAWRUNE),
+		DEATH(ItemID.DEATHRUNE),
+		BLOOD(ItemID.BLOODRUNE),
+		SOUL(ItemID.SOULRUNE),
+		WRATH(ItemID.WRATHRUNE),
+		MIST(ItemID.MISTRUNE),
+		DUST(ItemID.DUSTRUNE),
+		MUD(ItemID.MUDRUNE),
+		SMOKE(ItemID.SMOKERUNE),
+		STEAM(ItemID.STEAMRUNE),
+		LAVA(ItemID.LAVARUNE),
+		AETHER(ItemID.AETHERRUNE);
 
 		private final int itemId;
 
@@ -252,9 +325,5 @@ public class RunecraftingTrackerPlugin extends Plugin
 			this.itemId = itemId;
 		}
 
-		public int getItemId()
-		{
-			return itemId;
-		}
-	}
+    }
 }
