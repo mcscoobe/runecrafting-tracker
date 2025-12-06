@@ -45,9 +45,10 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.StatChanged;
+import net.runelite.api.Skill;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
@@ -67,7 +68,6 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
-	private static final int RUNECRAFTING_ANIMATION_ID = 791;
 
 	// Whitelist of region IDs where runecrafting occurs (from actual game data)
 	private static final Set<Integer> RUNECRAFTING_REGIONS = ImmutableSet.of(
@@ -94,10 +94,6 @@ public class RunecraftingTrackerPlugin extends Plugin
 		6715,
 		// Blood Altar (Zeah)
 		12618, 12619, 12620, 12874, 12875, 12876, 13130, 13131, 13132,
-		// Abyss
-		13107, 12107,
-		// Guardians of the Rift
-		15004, 14484, 14996, 15260,
 		// Ourania altar
 		12119
 	);
@@ -134,6 +130,9 @@ public class RunecraftingTrackerPlugin extends Plugin
 			.build();
 
 		clientToolbar.addNavigation(uiNavigationButton);
+
+		// Prime an initial snapshot so the first craft can be detected
+		clientThread.invokeLater(this::takeInventorySnapshot);
 	}
 
 	@Override
@@ -169,26 +168,23 @@ public class RunecraftingTrackerPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onAnimationChanged(AnimationChanged event)
+	public void onStatChanged(StatChanged event)
 	{
+		if (event.getSkill() != Skill.RUNECRAFT)
+		{
+			return;
+		}
+
 		if (!isInRunecraftingRegion())
 		{
 			return;
 		}
 
-		if (event.getActor() == null || event.getActor() != client.getLocalPlayer())
-		{
-			return;
-		}
-
-		int animId = event.getActor().getAnimation();
-		if (animId == RUNECRAFTING_ANIMATION_ID)
+		// Only take snapshot if one doesn't exist yet (before crafting)
+		// Don't overwrite the baseline after crafting or we can't detect the difference
+		if (inventorySnapshot == null)
 		{
 			takeInventorySnapshot();
-		}
-		else
-		{
-			inventorySnapshot = null;
 		}
 	}
 
