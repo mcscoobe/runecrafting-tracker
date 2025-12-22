@@ -57,11 +57,11 @@ public class RunecraftingTrackerPanel extends PluginPanel
 	// When there is nothing tracked, display this
 	private final PluginErrorPanel errorPanel = new PluginErrorPanel();
 	private final JPanel layoutContainer;
-	private ItemManager itemManager;
-	private LinkedList<PanelItemData> runeTracker;
+	private final ItemManager itemManager;
+	private final LinkedList<PanelItemData> runeTracker;
 
 	private final ImageIcon COIN_ICON =
-			new ImageIcon(ImageUtil.getResourceStreamFromClass(RunecraftingTrackerPlugin.class,"COIN.png"));
+			new ImageIcon(ImageUtil.loadImageResource(RunecraftingTrackerPlugin.class,"COIN.png"));
 
 
 	RunecraftingTrackerPanel(ItemManager itemManager, LinkedList<PanelItemData> runeTracker)
@@ -93,7 +93,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 			.mapToLong(runeData -> (long) runeData.getCrafted() * runeData.getCostPerRune())
 			.sum();
 
-		if (runeTracker.size() == 0)
+		if (runeTracker.isEmpty())
 		{
 			layoutContainer.add(errorPanel);
 		} else {
@@ -123,9 +123,9 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		return runeTracker;
 	}
 
-	private static String createLabel(String label, long value)
+	private static String createLabel(long value)
 	{
-		return createLabel(label, value, "");
+		return createLabel("Crafted: ", value, "");
 	}
 
 	private static String createLabel(String label, long value, String valueSuffix)
@@ -150,7 +150,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		textContainer.setLayout(new GridLayout(2, 1));
 		textContainer.setBorder(new EmptyBorder(TEXT_BORDER, TEXT_BORDER, TEXT_BORDER, ITEM_BORDER_HORIZONTAL));
 
-		JLabel topLine = new JLabel(createLabel("Crafted: ", craftedCount));
+		JLabel topLine = new JLabel(createLabel(craftedCount));
 		topLine.setForeground(Color.WHITE);
 		topLine.setFont(FontManager.getRunescapeSmallFont());
 
@@ -192,7 +192,7 @@ public class RunecraftingTrackerPanel extends PluginPanel
 
 		resetAll.addActionListener(e ->
 		{
-			final int result = JOptionPane.showOptionDialog(panelContainer, String.format("<html>This will permanently delete <b>all</b> crafted runes.</html>"),
+			final int result = JOptionPane.showOptionDialog(panelContainer, "<html>This will permanently delete <b>all</b> crafted runes.</html>",
 					"Are you sure?", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
 					null, new String[]{"Yes", "No"}, "No");
 
@@ -214,7 +214,9 @@ public class RunecraftingTrackerPanel extends PluginPanel
 		});
 
 		final JPopupMenu popupMenu = new JPopupMenu();
-		popupMenu.setBorder(new EmptyBorder(TOP_PANEL_BORDER, TOP_PANEL_BORDER, TOP_PANEL_BORDER, TOP_PANEL_BORDER));
+		// Set uniform border on all sides
+		int borderSize = TOP_PANEL_BORDER;
+		popupMenu.setBorder(new EmptyBorder(borderSize, borderSize, borderSize, borderSize));
 		popupMenu.add(resetAll);
 		panelContainer.setComponentPopupMenu(popupMenu);
 

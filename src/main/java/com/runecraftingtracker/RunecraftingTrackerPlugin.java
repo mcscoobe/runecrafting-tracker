@@ -26,20 +26,18 @@ package com.runecraftingtracker;
 
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
@@ -61,11 +59,22 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RunecraftingTrackerPlugin extends Plugin
 {
+	// Rune pouch VarBits for tracking contents
+	private static final int[] RUNE_POUCH_AMOUNT_VARBITS = {
+		VarbitID.RUNE_POUCH_QUANTITY_1, VarbitID.RUNE_POUCH_QUANTITY_2, VarbitID.RUNE_POUCH_QUANTITY_3,
+		VarbitID.RUNE_POUCH_QUANTITY_4, VarbitID.RUNE_POUCH_QUANTITY_5, VarbitID.RUNE_POUCH_QUANTITY_6
+	};
+	private static final int[] RUNE_POUCH_TYPE_VARBITS = {
+		VarbitID.RUNE_POUCH_TYPE_1, VarbitID.RUNE_POUCH_TYPE_2, VarbitID.RUNE_POUCH_TYPE_3,
+		VarbitID.RUNE_POUCH_TYPE_4, VarbitID.RUNE_POUCH_TYPE_5, VarbitID.RUNE_POUCH_TYPE_6
+	};
+
 	private RunecraftingTrackerPanel uiPanel;
 	private NavigationButton uiNavigationButton;
 	private final LinkedList<PanelItemData> runeTracker = new LinkedList<>();
 	private final Map<Integer, PanelItemData> runeTrackerMap = new HashMap<>();
 	private Multiset<Integer> inventorySnapshot;
+	private Multiset<Integer> runePouchSnapshot;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -78,9 +87,6 @@ public class RunecraftingTrackerPlugin extends Plugin
 
 	@Inject
 	private ItemManager itemManager;
-
-	@Inject
-	private WorldView worldView;
 
 	@Override
 	protected void startUp() throws Exception
@@ -98,7 +104,8 @@ public class RunecraftingTrackerPlugin extends Plugin
 		clientToolbar.addNavigation(uiNavigationButton);
 
 		// Prime an initial snapshot so the first craft can be detected
-		clientThread.invokeLater(this::takeInventorySnapshot);
+        // Don't take rune pouch snapshot on startup to avoid counting existing runes as crafted
+        clientThread.invokeLater(this::takeInventorySnapshot);
 	}
 
 	@Override
@@ -146,71 +153,105 @@ public class RunecraftingTrackerPlugin extends Plugin
 			return;
 		}
 
-		// Only take snapshot if one doesn't exist yet (before crafting)
-		// Don't overwrite the baseline after crafting or we can't detect the difference
-		if (inventorySnapshot == null)
+		// Process both inventory and rune pouch changes after XP gain
+		final ItemContainer itemContainer = client.getItemContainer(InventoryID.INV);
+		if (itemContainer != null)
 		{
-			takeInventorySnapshot();
+			processChange(itemContainer);
 		}
+		
+		// Process rune pouch changes with a small delay to ensure VarBits are updated
+		clientThread.invokeLater(this::processRunePouchChange);
 	}
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (isNotInRunecraftingRegion())
-		{
-			return;
-		}
-
-		if (event.getContainerId() != InventoryID.INV)
-		{
-			return;
-		}
-
-		processChange(event.getItemContainer());
+		// Remove automatic inventory processing - only process after XP gains
+		// This prevents bank withdrawals from being counted as "crafted"
+		return;
 	}
 
 	private void processChange(ItemContainer current)
 	{
-		if (inventorySnapshot != null)
+		// Take initial snapshot if needed
+		if (inventorySnapshot == null)
 		{
-			// Create inventory multiset {id -> quantity}
-			Multiset<Integer> currentInventory = createInventorySnapshot(current);
+			inventorySnapshot = createInventorySnapshot(current);
+			return; // Don't process changes on first snapshot
+		}
 
-			// Calculate difference manually to avoid @Beta API
-			Multiset<Integer> diff = HashMultiset.create();
-			for (Integer itemId : currentInventory.elementSet())
+		// Create inventory multiset {id -> quantity}
+		Multiset<Integer> currentInventory = createInventorySnapshot(current);
+
+		// Calculate difference manually to avoid @Beta API
+		Multiset<Integer> diff = HashMultiset.create();
+		for (Integer itemId : currentInventory.elementSet())
+		{
+			int currentCount = currentInventory.count(itemId);
+			int snapshotCount = inventorySnapshot.count(itemId);
+			int difference = currentCount - snapshotCount;
+			if (difference > 0)
 			{
-				int currentCount = currentInventory.count(itemId);
-				int snapshotCount = inventorySnapshot.count(itemId);
-				int difference = currentCount - snapshotCount;
-				if (difference > 0)
-				{
-					diff.add(itemId, difference);
-				}
-			}
-
-			if (!diff.isEmpty()) {
-				for (Multiset.Entry<Integer> entry : diff.entrySet())
-				{
-					PanelItemData runeData = runeTrackerMap.get(entry.getElement());
-					if (runeData != null)
-					{
-						if (!runeData.isVisible())
-						{
-							runeData.setVisible(true);
-						}
-						runeData.setCrafted(runeData.getCrafted() + entry.getCount());
-					}
-				}
-				inventorySnapshot = currentInventory;
-
-				SwingUtilities.invokeLater(() -> {
-					uiPanel.pack();
-					uiPanel.refresh();
-				});
+				diff.add(itemId, difference);
 			}
 		}
+
+		if (!diff.isEmpty()) {
+			updateRuneTracker(diff);
+		}
+		inventorySnapshot = currentInventory;
+	}
+
+	private void processRunePouchChange()
+	{
+		// Take initial snapshot if needed
+		if (runePouchSnapshot == null)
+		{
+			runePouchSnapshot = createRunePouchSnapshot();
+			return; // Don't process changes on first snapshot
+		}
+
+		Multiset<Integer> currentRunePouch = createRunePouchSnapshot();
+
+		// Calculate difference
+		Multiset<Integer> diff = HashMultiset.create();
+		for (Integer itemId : currentRunePouch.elementSet())
+		{
+			int currentCount = currentRunePouch.count(itemId);
+			int snapshotCount = runePouchSnapshot.count(itemId);
+			int difference = currentCount - snapshotCount;
+			if (difference > 0)
+			{
+				diff.add(itemId, difference);
+			}
+		}
+
+		if (!diff.isEmpty()) {
+			updateRuneTracker(diff);
+		}
+		runePouchSnapshot = currentRunePouch;
+	}
+
+	private void updateRuneTracker(Multiset<Integer> diff)
+	{
+		for (Multiset.Entry<Integer> entry : diff.entrySet())
+		{
+			PanelItemData runeData = runeTrackerMap.get(entry.getElement());
+			if (runeData != null)
+			{
+				if (!runeData.isVisible())
+				{
+					runeData.setVisible(true);
+				}
+				runeData.setCrafted(runeData.getCrafted() + entry.getCount());
+			}
+		}
+
+		SwingUtilities.invokeLater(() -> {
+			uiPanel.pack();
+			uiPanel.refresh();
+		});
 	}
 
 	private void takeInventorySnapshot()
@@ -220,6 +261,40 @@ public class RunecraftingTrackerPlugin extends Plugin
 		{
 			inventorySnapshot = createInventorySnapshot(itemContainer);
 		}
+	}
+
+	private void takeRunePouchSnapshot()
+	{
+		runePouchSnapshot = createRunePouchSnapshot();
+	}
+
+	private Multiset<Integer> createRunePouchSnapshot()
+	{
+		Multiset<Integer> snapshot = HashMultiset.create();
+		final EnumComposition runepouchEnum = client.getEnum(982); // EnumID.RUNEPOUCH_RUNE
+		
+		if (runepouchEnum == null)
+		{
+			return snapshot;
+		}
+
+		for (int i = 0; i < RUNE_POUCH_AMOUNT_VARBITS.length; i++)
+		{
+			int amount = client.getVarbitValue(RUNE_POUCH_AMOUNT_VARBITS[i]);
+			int runeType = client.getVarbitValue(RUNE_POUCH_TYPE_VARBITS[i]);
+			
+			if (runeType != 0 && amount > 0)
+			{
+				// Convert rune pouch type ID to actual item ID
+				int itemId = runepouchEnum.getIntValue(runeType);
+				if (itemId != -1)
+				{
+					snapshot.add(itemId, amount);
+				}
+			}
+		}
+		
+		return snapshot;
 	}
 
 	private Multiset<Integer> createInventorySnapshot(ItemContainer container)
@@ -237,7 +312,7 @@ public class RunecraftingTrackerPlugin extends Plugin
 			return true;
 		}
 
-		int[] regions = worldView.getMapRegions();
+		int[] regions = client.getMapRegions();
 		if (regions == null)
 		{
 			return true;
