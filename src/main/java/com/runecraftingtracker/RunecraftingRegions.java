@@ -49,12 +49,24 @@ public class RunecraftingRegions
 		8251, 8252, 8253, 8507, 8508, 8509,
 		// Nature Altar
 		9546, 9547, 9548,
-		// Law Altar (shares regions with Body/Nature)
-		// Death Altar
+		// Zeah Blood Altar — verified in-game (region 6715).
+		// The Death Altar shares regions with the Cosmic/Chaos blocks above, so it
+		// needs no dedicated entry.
 		6715,
 		// Blood Altar (Zeah)
 		12618, 12619, 12620, 12874, 12875, 12876, 13130, 13131, 13132,
-		// Ourania altar
+		// Soul Altar (Zeah) — interior, wiki coord (1815, 3854) → region (28<<8)|60 = 7228
+		7228,
+		// Wrath Altar (Myths' Guild basement) — verified in-game
+		9515, 9516, 9771, 9772,
+		// Aether runes are crafted at the Cosmic Altar (already covered above),
+		// not at a dedicated altar, so no extra entry needed.
+		// Guardians of the Rift / Temple of the Eye — confirmed single region via
+		// official GOTR Helper plugin: MINIGAME_MAIN_REGION = 14484
+		14484,
+		// Law Altar — interior region unconfirmed; verify in-game with dev tools.
+		// The old code claimed it shares Body/Nature regions but that is unverified.
+		// Ourania Altar
 		12119
 	);
 
