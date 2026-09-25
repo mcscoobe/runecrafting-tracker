@@ -35,9 +35,9 @@ public class PanelItemData
 	private int id;
 	private boolean visible;
 	private int crafted;
-	private int costPerRune;
+	private long costPerRune;
 
-	public PanelItemData(String name, int id, boolean visible, int crafted, int costPerRune)
+	public PanelItemData(String name, int id, boolean visible, int crafted, long costPerRune)
 	{
 		this.name = name;
 		this.id = id;
